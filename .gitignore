@@ -1,0 +1,7 @@
+__pycache__/*
+.vscode/*
+.DS_Store
+*.pyc
+run_aml.py
+*.log
+*.slurm
