@@ -171,8 +171,12 @@ def load_pretrained_resnet50(cfg, res50_model):
         pretrained_weights = os.path.join(cfg.args.workdir, "pretrained_models/moco_v2_200ep_pretrain.pth.tar")
         state_dict = load_mocov2_pretrained(pretrained_weights)
     else:
-        pretrained_weights = os.path.join(cfg.args.workdir, "pretrained_models/resnet50-0676ba61.pth")
-        state_dict = torch.load(pretrained_weights, map_location='cpu')
+        # modification: let the default behavior to use the default pre-trained weights
+        logger.info("loaded no weights, using default resnet50 weights")
+        return
+    # else:
+    #     pretrained_weights = os.path.join(cfg.args.workdir, "pretrained_models/resnet50-0676ba61.pth")
+    #     state_dict = torch.load(pretrained_weights, map_location='cpu')
 
     msg = res50_model.load_state_dict(state_dict, strict=False)
     logger.info(msg)

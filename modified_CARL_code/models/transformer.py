@@ -4,6 +4,7 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import timm
 
 from models.resnet_c2d import *
 
@@ -282,19 +283,49 @@ class TransformerModel(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        res50_model = models.resnet50(pretrained=True)
-        if cfg.MODEL.BASE_MODEL.LAYER == 3:
-            self.backbone = nn.Sequential(*list(res50_model.children())[:-3]) # output of layer3: 1024x14x14
-            self.res_finetune = list(res50_model.children())[-3]
-            cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
-        elif cfg.MODEL.BASE_MODEL.LAYER == 2:
-            self.backbone = nn.Sequential(*list(res50_model.children())[:-4]) # output of layer2
-            self.res_finetune = nn.Sequential(*list(res50_model.children())[-4:-2])
-            cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
-        else:
-            self.backbone = nn.Sequential(*list(res50_model.children())[:-2]) # output of layer4: 2048x7x7
+
+        # Backbone
+        if 'TIMM-' in cfg.MODEL.BASE_MODEL.NETWORK: # NEW - TIMM Models
+            # if 'vit_small_patch16_224.dino' in cfg.MODEL.BASE_MODEL.NETWORK:
+            #     self.backbone = timm.create_model('vit_small_patch16_224.dino', pretrained=True)
+            #     # model = timm.create_model(model_name, pretrained=True)
+            #     # self.backbone = nn.Sequential(*list(res50_model.children())[:-2])
+            #     cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
+            # else:
+            #     print('WARNING: unknown TIMM model')
+            #     print(cfg.MODEL.BASE_MODEL.NETWORK)
+            #     exit()
+            model_name = cfg.MODEL.BASE_MODEL.NETWORK[5:]
+            self.backbone = timm.create_model('vit_small_patch16_224.dino', pretrained=True)
+            if model_name == 'vit_small_patch16_224.dino' or model_name == 'vit_small_patch8_224.dino':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
+            elif model_name == 'vit_base_patch16_224.dino' or model_name == 'vit_base_patch8_224.dino':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
+            else:
+                print('ERROR: unknown TIMM model')
+                print(model_name)
+                exit()
+            print('loaded backbone: ' + cfg.MODEL.BASE_MODEL.NETWORK)
             self.res_finetune = nn.Identity()
-            cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
+
+        else: # RESNET (original CARL)
+            res50_model = models.resnet50(pretrained=True)
+            # NEW - modification - missing model loading?
+            load_pretrained_resnet50(cfg, res50_model)
+            if cfg.MODEL.BASE_MODEL.LAYER == 3:
+                self.backbone = nn.Sequential(*list(res50_model.children())[:-3]) # output of layer3: 1024x14x14
+                self.res_finetune = list(res50_model.children())[-3]
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
+            elif cfg.MODEL.BASE_MODEL.LAYER == 2:
+                self.backbone = nn.Sequential(*list(res50_model.children())[:-4]) # output of layer2
+                self.res_finetune = nn.Sequential(*list(res50_model.children())[-4:-2])
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
+            else:
+                self.backbone = nn.Sequential(*list(res50_model.children())[:-2]) # output of layer4: 2048x7x7
+                self.res_finetune = nn.Identity()
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 2048
+        
+
         self.embed = TransformerEmbModel(cfg)
         self.embedding_size = self.embed.embedding_size
         
@@ -318,13 +349,17 @@ class TransformerModel(nn.Module):
             with torch.no_grad():
                 curr_emb = self.backbone(curr_data)
             curr_emb = self.res_finetune(curr_emb)
-            _, out_c, out_h, out_w = curr_emb.size()
+
+            if len(curr_emb.size()) == 2:
+                _, out_c = curr_emb.size()
+                out_h = 1
+                out_w = 1 
+            else:
+                _, out_c, out_h, out_w = curr_emb.size()
             curr_emb = curr_emb.contiguous().view(batch_size, cur_steps, out_c, out_h, out_w)
             backbone_out.append(curr_emb)
         x = torch.cat(backbone_out, dim=1)
-        
         x = self.embed(x, video_masks=video_masks)
-
         if self.cfg.MODEL.PROJECTION and project:
             x = self.ssl_projection(x)
             x = F.normalize(x, dim=-1)

@@ -16,4 +16,5 @@ def test_load_model(model_name):
 
 
 if __name__ == '__main__':
-    test_load_model('vit_small_patch16_224.dino')
+    print_options()
+    # test_load_model('vit_small_patch16_224.dino')
