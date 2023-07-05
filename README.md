@@ -23,4 +23,7 @@ pip install protobuf==3.20.*
 
 # PyAV fix:
 pip install --force-reinstall av
+
+# Update TIMM:
+pip install timm==0.9.2
 ```
