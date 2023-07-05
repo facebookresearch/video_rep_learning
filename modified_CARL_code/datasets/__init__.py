@@ -57,10 +57,14 @@ def construct_dataloader(cfg, split, mode="auto", no_eval=False):
                                             batch_sampler=train_sampler)
             else:
                 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if cfg.NUM_GPUS > 1 else None
+                # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, 
+                #                                         shuffle=True if train_sampler is None else False,
+                #                                         num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=train_sampler,
+                #                                         drop_last=True, prefetch_factor=2) # NEW testing increased prefetch_factor
                 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, 
                                                         shuffle=True if train_sampler is None else False,
                                                         num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=train_sampler,
-                                                        drop_last=True, prefetch_factor=2) # NEW testing increased prefetch_factor
+                                                        drop_last=True, persistent_workers=True) # NEW testing persistent workers
             train_eval_loader = []
             for dataset_name in cfg.DATASETS:
                 train_eval_dataset = PennAction(cfg, split, dataset_name, mode="eval", sample_all=True)
@@ -101,7 +105,7 @@ def construct_dataloader(cfg, split, mode="auto", no_eval=False):
                 val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset) if cfg.NUM_GPUS > 1 else None
                 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.EVAL.BATCH_SIZE, shuffle=False,
                                                         num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None,
-                                                        drop_last=True)
+                                                        drop_last=True, persistent_workers=True) # NEW - turning on persistent workers
             val_eval_loader = []
             for dataset_name in cfg.DATASETS:
                 val_eval_dataset = PennAction(cfg, split, dataset_name, mode="eval", sample_all=True)

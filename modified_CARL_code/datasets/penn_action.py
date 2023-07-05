@@ -38,7 +38,7 @@ PENN_ACTION_LIST = [
 
 # add caching of a fixed number of variants per sample
 class PennAction(torch.utils.data.Dataset):
-    def __init__(self, cfg, split, dataset_name=None, mode="auto", sample_all=False, use_cache=True, nvariants=5):
+    def __init__(self, cfg, split, dataset_name=None, mode="auto", sample_all=False):
         assert split in ["train", "val", "test"]
         self.cfg = cfg
         self.split = split
@@ -83,8 +83,15 @@ class PennAction(torch.utils.data.Dataset):
         if 'tcn' in cfg.TRAINING_ALGO:
             self.num_frames = self.num_frames // 2
 
-        self.use_cache = use_cache
-        self.nvariants = nvariants
+        # NEW - add optional caching of pre-processed videos to accelerate training
+        # to enable, add "CACHE_VARIANTS" > 0 to the cfg.DATA
+        if 'CACHE_VARIANTS' in self.cfg.DATA:
+            self.nvariants = self.cfg.DATA.CACHE_VARIANTS
+            self.use_cache = True
+            print('Using data pre-caching with ' + str(self.nvariants) + ' variants')
+        else:
+            self.nvariants = 0
+            self.use_cache = False
         if self.use_cache:
             self.cache_dir = os.path.join(self.cfg.PATH_TO_DATASET, "cache")
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -94,6 +101,13 @@ class PennAction(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
+
+    # NEW get preproc
+    def get_preproc(self):
+        return self.data_preprocess
+
+
+    # NEW modified to return videos without pre-processing, so preprocessing can be handled on GPU-side
     def __getitem__(self, index):
         t0 = time.time()
 
@@ -153,9 +167,10 @@ class PennAction(torch.utils.data.Dataset):
             # print('-----')
             t0 = time.time()
 
-            view_0 = self.data_preprocess(video[steps_0.long()])
+            # view_0 = self.data_preprocess(video[steps_0.long()])
             # view_0 = self.data_preprocess(video[steps_0.long()], self.cfg, self.augment)
             # view_0 = apply_ssl_data_augment(video[steps_0.long()], self.cfg, self.augment)
+            view_0 = video[steps_0.long()]
 
             # print('preproc0: ' + str(time.time()-t0))
             # print('CPU: ' + str(psutil.Process().cpu_num()))
@@ -169,16 +184,18 @@ class PennAction(torch.utils.data.Dataset):
             # print(time.time()-t0)
             # t0 = time.time()
 
-            view_1 = self.data_preprocess(video[steps_1.long()])
+            # view_1 = self.data_preprocess(video[steps_1.long()])
             # view_1 = self.data_preprocess(video[steps_1.long()], self.cfg, self.augment)
             # view_1 = apply_ssl_data_augment(video[steps_1.long()], self.cfg, self.augment)
+            view_1 = video[steps_1.long()]
 
             # print('preproc1')
             # print(time.time()-t0)
             # t0 = time.time()
 
             label_1 = frame_label[chosen_step_1.long()]
-            videos = torch.stack([view_0, view_1], dim=0)
+            # videos = torch.stack([view_0, view_1], dim=0)
+            videos = (view_0, view_1)
             labels = torch.stack([label_0, label_1], dim=0)
             seq_lens = torch.tensor([seq_len, seq_len])
             chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)
@@ -210,8 +227,7 @@ class PennAction(torch.utils.data.Dataset):
 
         # Select data based on steps
         video = video[steps.long()]
-        
-        video = self.data_preprocess(video)
+        # video = self.data_preprocess(video)
         # video = self.data_preprocess(video, self.cfg, self.augment)
 
         if self.cfg.DATA.FRAME_LABELS:

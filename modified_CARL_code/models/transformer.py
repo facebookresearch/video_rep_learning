@@ -285,30 +285,61 @@ class TransformerModel(nn.Module):
         self.cfg = cfg
 
         # Backbone
-        if 'TIMM-' in cfg.MODEL.BASE_MODEL.NETWORK: # NEW - TIMM Models
-            # if 'vit_small_patch16_224.dino' in cfg.MODEL.BASE_MODEL.NETWORK:
-            #     self.backbone = timm.create_model('vit_small_patch16_224.dino', pretrained=True)
-            #     # model = timm.create_model(model_name, pretrained=True)
-            #     # self.backbone = nn.Sequential(*list(res50_model.children())[:-2])
-            #     cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
-            # else:
-            #     print('WARNING: unknown TIMM model')
-            #     print(cfg.MODEL.BASE_MODEL.NETWORK)
-            #     exit()
+        if 'TIMM-' in cfg.MODEL.BASE_MODEL.NETWORK: # NEW - TIMM Model Backbones
             model_name = cfg.MODEL.BASE_MODEL.NETWORK[5:]
-            self.backbone = timm.create_model('vit_small_patch16_224.dino', pretrained=True)
+            model = timm.create_model(model_name, pretrained=True)
             if model_name == 'vit_small_patch16_224.dino' or model_name == 'vit_small_patch8_224.dino':
                 cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
             elif model_name == 'vit_base_patch16_224.dino' or model_name == 'vit_base_patch8_224.dino':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 768
+            elif model_name == 'vit_small_patch14_dinov2.lvd142m':
                 cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 384
+            elif model_name == 'vit_base_patch14_dinov2.lvd142m':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 768
+            elif model_name == 'vit_large_patch14_dinov2.lvd142m':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 768
+            elif model_name == 'vit_giant_patch14_dinov2.lvd142m':
+                cfg.MODEL.BASE_MODEL.OUT_CHANNEL = 768
             else:
                 print('ERROR: unknown TIMM model')
                 print(model_name)
                 exit()
             print('loaded backbone: ' + cfg.MODEL.BASE_MODEL.NETWORK)
-            self.res_finetune = nn.Identity()
+            
 
-        else: # RESNET (original CARL)
+            # partial fine-tuning, currently supported for DINO v1:
+            if model_name in ['vit_small_patch16_224.dino', 'vit_small_patch8_224.dino', 'vit_base_patch16_224.dino', 'vit_base_patch8_224.dino']:
+                # f_layer = cfg.MODEL.BASE_MODEL.LAYER
+                # TODO - remove old splicing method
+                # if f_layer < 0 or f_layer > 11:
+                #     print('not using partial fine-tuning')
+                #     # self.backbone = model
+                #     # self.res_finetune = nn.Identity()
+                #     # DEBUG - test what this does
+                #     parts = list(model.children())
+                #     self.backbone = nn.Sequential(*parts)
+                #     self.res_finetune = nn.Identity()
+                # else:
+                #     print('partial fine-tuning after transfomer block ' + str(f_layer))
+                #     parts = list(model.children())
+                #     t_blocks = list(parts[4].children())
+                #     backbone = parts[:4] + t_blocks[:f_layer]
+                #     finetune = t_blocks[f_layer:] + parts[5:]
+                #     self.backbone = nn.Sequential(*backbone)
+                #     self.res_finetune = nn.Sequential(*finetune)
+                if cfg.MODEL.BASE_MODEL.LAYER < 0 or cfg.MODEL.BASE_MODEL.LAYER > 11: # no partial finetuning
+                    print('backbone fully frozen')
+                    self.backbone = model
+                    self.res_finetune = nn.Identity()
+                else:
+                    freeze_vit(model, cfg.MODEL.BASE_MODEL.LAYER)
+                    self.backbone = nn.Identity()
+                    self.res_finetune = model
+            else:
+                print('partial fine-tuning not supported for: ' + model_name)
+                self.backbone = model
+                self.res_finetune = nn.Identity()
+        else: # RESNET Backbones (original CARL)
             res50_model = models.resnet50(pretrained=True)
             # NEW - modification - missing model loading?
             load_pretrained_resnet50(cfg, res50_model)
@@ -350,13 +381,14 @@ class TransformerModel(nn.Module):
                 curr_emb = self.backbone(curr_data)
             curr_emb = self.res_finetune(curr_emb)
 
-            if len(curr_emb.size()) == 2:
+            if len(curr_emb.size()) == 2: # DINO CLS output
                 _, out_c = curr_emb.size()
                 out_h = 1
                 out_w = 1 
-            else:
+            else: # ResNet output
                 _, out_c, out_h, out_w = curr_emb.size()
             curr_emb = curr_emb.contiguous().view(batch_size, cur_steps, out_c, out_h, out_w)
+
             backbone_out.append(curr_emb)
         x = torch.cat(backbone_out, dim=1)
         x = self.embed(x, video_masks=video_masks)
@@ -369,3 +401,25 @@ class TransformerModel(nn.Module):
             return self.classifier(x)
         return x
 
+
+
+# NEW: freeze the parameters of a timm-loaded vit model up to a specified layer
+def freeze_vit(model, layer, silent=False):
+    fc = 0
+    fb = 0
+    for i,c in enumerate(model.children()):
+        if i < 4: # input layers
+            for p in c.parameters():
+                p.requires_grad = False
+                fc += 1
+        else: # transformer blocks
+            for b_idx, b in enumerate(c.children()):
+                if b_idx == layer: break
+                for p in b.parameters():
+                    p.requires_grad = False
+                    fc += 1
+                fb += 1
+            break
+    if not silent:
+        print('frozen block count: ' + str(fb))
+        print('frozen param count: ' + str(fc))
