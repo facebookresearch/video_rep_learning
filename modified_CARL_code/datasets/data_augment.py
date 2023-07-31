@@ -331,6 +331,44 @@ class ComposeOp:
             #     print(f"op time: {time.time()-start_time:.3f}")
         return img_list
 
+# ==========
+
+
+# NEW - Op holder for torchvision.transforms.ColorJitter, for better efficiency
+# like RandomOp, takes a prob parameter to control augmentation probability
+class ColorJitterOp:
+    def __init__(self, prob=0, img_brightness=0, img_contrast=0, img_saturation=0, img_hue=0):
+        self.img_brightness = img_brightness
+        self.img_contrast = img_contrast
+        self.img_saturation = img_saturation
+        self.img_hue = img_hue
+        self.prob = prob
+        self.cj = transforms.ColorJitter(brightness=img_brightness, 
+            contrast=img_contrast, saturation=img_saturation, hue=img_hue)
+
+    def __call__(self, images):
+        if random.uniform(0,1) < self.prob:
+            images = self.cj(images)
+        return images
+
+
+# NEW - Op holder for torchvision.transforms.GaussianBlur, for better efficiency
+# like RandomOp, takes a prob parameter to control augmentation probability
+class GaussianBlurOp:
+    def __init__(self, prob=0):
+        self.prob = prob
+        # self.g_var = random.uniform(0.1, 2.0)
+        # self.g_var = random.uniform(0.4, 8.0) # above version blurs 4 times, so this is more accurate
+        self.gb = transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 2.0)) # TODO - tune these settings
+
+    def __call__(self, images):
+        if random.uniform(0,1) < self.prob:
+            images = self.gb(images)
+        return images
+
+
+# ==========
+
 def create_ssl_data_augment(cfg, augment):
     ops = []
     if augment:
@@ -341,13 +379,24 @@ def create_ssl_data_augment(cfg, augment):
             'target_width': cfg.IMAGE_SIZE
         }))
         ops.append(RandomOp(flip, 0.5))
-        ops.append(RandomOp(color_jitter, 0.8, **{
-            'img_brightness': 0.8*s,
-            'img_contrast': 0.8*s,
-            'img_saturation': 0.8*s,
-            'img_hue': 0.2*s,
-            'img_blur': 0.0 if cfg.DATASETS[0] == "finegym" else 0.5*s,
-        }))
+        # old color_jitter (and blur)
+        # ops.append(RandomOp(color_jitter, 0.8, **{
+        #     'img_brightness': 0.8*s,
+        #     'img_contrast': 0.8*s,
+        #     'img_saturation': 0.8*s,
+        #     'img_hue': 0.2*s,
+        #     'img_blur': 0.0 if cfg.DATASETS[0] == "finegym" else 0.5*s,
+        # }))
+        # new color jitter and blur
+        # TODO TEMP
+        print('NEW COLOR JITTER LOADED')
+        ops.append(ColorJitterOp(0.8,
+            img_brightness = 0.8*s,
+            img_contrast = 0.8*s,
+            img_saturation = 0.8*s,
+            img_hue = 0.2*s,
+        ))
+        ops.append(GaussianBlurOp(0.4)) # TODO technically 0.4*s would be more accurate
         ops.append(RandomOp(grayscale, 0.2))
     else:
         ops.append(AugmentOp(uniform_crop, **{
@@ -362,6 +411,7 @@ def create_ssl_data_augment(cfg, augment):
     }))
     return ComposeOp(ops)
 
+# TODO - this code needs to be made more efficient too
 def create_data_augment(cfg, augment):
     ops = []
     if augment:
@@ -401,3 +451,18 @@ def create_data_augment(cfg, augment):
         "stddev": [0.229, 0.224, 0.225]
     }))
     return ComposeOp(ops)
+
+
+# ==================================================
+
+
+# NEW - function to construct data augmentation pipeline without going through the dataloader
+# for use with GPU-based data loading
+def get_data_preprocess(cfg, mode):
+    if cfg.SSL and mode=="train":
+        data_preprocess = create_ssl_data_augment(cfg, augment=True)
+    elif mode=="train":
+        data_preprocess = create_data_augment(cfg, augment=True)
+    else:
+        data_preprocess = create_data_augment(cfg, augment=False)
+    return data_preprocess

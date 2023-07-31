@@ -18,6 +18,9 @@ import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 # from datasets.new_data_augment import apply_data_augment, apply_ssl_data_augment
 
+# EXPERIMENTAL - TODO - LOCAL SCRATCH CACHE
+USE_SCRATCH_CACHE = False
+
 logger = logging.get_logger(__name__)
 
 PENN_ACTION_LIST = [
@@ -98,6 +101,10 @@ class PennAction(torch.utils.data.Dataset):
         if not self.augment:
             self.nvariants = 1
 
+        # NEW - EXPERIMENTAL - SCRATCH CACHE
+        if USE_SCRATCH_CACHE:
+            print('SCRATCH CACHE ENABLED')
+
     def __len__(self):
         return len(self.dataset)
 
@@ -118,31 +125,48 @@ class PennAction(torch.utils.data.Dataset):
         seq_len = self.dataset[index]["seq_len"]
         video_file = os.path.join(self.cfg.PATH_TO_DATASET, self.dataset[index]["video_file"])
         
-        if self.use_cache:
-            if self.cfg.SSL and not self.sample_all:
-                sub_cache = 'ssl'
-            else:
-                sub_cache = 'not_ssl'
-            cur_cache = os.path.join(self.cache_dir, sub_cache, self.dataset[index]["video_file"]+'_cache')
-            os.makedirs(cur_cache, exist_ok=True)
-            variants = os.listdir(cur_cache)
-            nv = len(variants)
-            if nv >= self.nvariants:
-                i = random.randint(0, nv-1)
-                cache_file = os.path.join(cur_cache, variants[i])
-                with open(cache_file, 'rb') as f:
-                    try:
-                        ret_data = pickle.load(f)
-                    except:
-                        print('WARNING: corrupted cache file:')
-                        print(cache_file)
-                        exit()
-                return ret_data
-            else:
-                out_cache = os.path.join(cur_cache, '%03i.pkl'%nv)
+        # OLD CACHE SYSTEM FOR FULLY PRE-PROC FILES
+        # TODO REMOVE
+        # if self.use_cache:
+        #     if self.cfg.SSL and not self.sample_all:
+        #         sub_cache = 'ssl'
+        #     else:
+        #         sub_cache = 'not_ssl'
+        #     cur_cache = os.path.join(self.cache_dir, sub_cache, self.dataset[index]["video_file"]+'_cache')
+        #     os.makedirs(cur_cache, exist_ok=True)
+        #     variants = os.listdir(cur_cache)
+        #     nv = len(variants)
+        #     if nv >= self.nvariants:
+        #         i = random.randint(0, nv-1)
+        #         cache_file = os.path.join(cur_cache, variants[i])
+        #         with open(cache_file, 'rb') as f:
+        #             try:
+        #                 ret_data = pickle.load(f)
+        #             except:
+        #                 print('WARNING: corrupted cache file:')
+        #                 print(cache_file)
+        #                 exit()
+        #         return ret_data
+        #     else:
+        #         out_cache = os.path.join(cur_cache, '%03i.pkl'%nv)
 
-        video, _, info = read_video(video_file, pts_unit='sec')
-        video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
+        # NEW CACHE SYSTEM FOR DECODED VIDEOS ON LOCAL DRIVE
+        # TODO UPDATE SETTINGS
+        cache_dir = '/scratch/mwalmer/temp/' # TODO - add setting
+        cache_file = os.path.join(cache_dir, self.dataset[index]["video_file"]+'_cache.pkl')
+        if USE_SCRATCH_CACHE and os.path.isfile(cache_file):
+            with open(cache_file, 'rb') as f:
+                video = pickle.load(f)
+        else:
+            video, _, info = read_video(video_file, pts_unit='sec')
+            video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
+            # NEW
+            if USE_SCRATCH_CACHE:
+                cur_cache, _ = os.path.split(cache_file)
+                os.makedirs(cur_cache, exist_ok=True)
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(video, f)
+        # TODO - add switch to turn this on and off
 
         # DEBUG - work towards caching the decoded video...
         # print(video)
@@ -227,16 +251,16 @@ class PennAction(torch.utils.data.Dataset):
 
         # Select data based on steps
         video = video[steps.long()]
-        # video = self.data_preprocess(video)
-        # video = self.data_preprocess(video, self.cfg, self.augment)
+        video = self.data_preprocess(video)
 
         if self.cfg.DATA.FRAME_LABELS:
             label = frame_label[chosen_steps.long()]
 
-        if self.use_cache:
-            ret_data = (video, label, torch.tensor(seq_len), chosen_steps, video_mask, name)
-            with open(out_cache, 'wb') as f:
-                pickle.dump(ret_data, f)
+        # TODO - REMOVE OLD CACHE STUFF
+        # if self.use_cache:
+        #     ret_data = (video, label, torch.tensor(seq_len), chosen_steps, video_mask, name)
+        #     with open(out_cache, 'wb') as f:
+        #         pickle.dump(ret_data, f)
         return video, label, torch.tensor(seq_len), chosen_steps, video_mask, name
 
     def sample_frames(self, seq_len, num_frames, pre_steps=None):

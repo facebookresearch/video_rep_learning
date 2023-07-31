@@ -131,14 +131,18 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
             del dataset
 
     # Add all metrics in a separate tag so that analysis is easier.
-    for task_name in embedding_tasks.keys():
+    # NEW - sort print order
+    # for task_name in embedding_tasks.keys():
+    task_order = sorted(list(embedding_tasks.keys()))
+    for task_name in task_order:
         for dataset in cfg.DATASETS:
             # logger.info(f"metrics/{dataset}_{task_name}: {metrics[task_name][dataset]:.3f}")
             summary_writer.add_scalar('metrics/%s_%s' % (dataset, task_name),
                                 metrics[task_name][dataset], cur_epoch)
         avg_metric = sum(metrics[task_name].values())
         avg_metric /= len(cfg.DATASETS)
-        logger.info(f"metrics/all_{task_name}: {avg_metric:.3f}")
+        # logger.info(f"metrics/all_{task_name}: {avg_metric:.3f}")
+        logger.info(f"metrics/all_{task_name}: {avg_metric:.4f}") # NEW - report extra decimal
         summary_writer.add_scalar('metrics/all_%s' % task_name,
                         avg_metric, cur_epoch)
     

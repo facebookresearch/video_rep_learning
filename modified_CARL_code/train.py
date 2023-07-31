@@ -72,6 +72,23 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
     for i in range(10):
         tmt[i] = 0.0
 
+    # NEW / EXPERIMENTAL TODO - backbone warmup check
+    if "BACKBONE_WARMUP" in cfg.TRAIN:
+        # TODO - currently only supported for smart fusion
+        if not cfg.MODEL.EMBEDDER_MODEL.FUSION_TYPE == 'smart':
+            print('INVALID CONFIG: BACKBONE_WARMUP only supported for MODEL.EMBEDDER_MODEL.FUSION_TYPE: smart')
+            exit(-1)
+        elif cur_epoch < cfg.TRAIN.BACKBONE_WARMUP:
+            print('BACKBONE_WARMUP: currently in warmup')
+            # model.embed.in_backbone_warmup = True # TODO - handle a better way
+            # model.set_warmup_status(True)
+            model.module.embed.set_warmup_status(True)
+        else:
+            print('BACKBONE_WARMUP: warmup ended')
+            # model.embed.in_backbone_warmup = False
+            # model.set_warmup_status(False)
+            model.module.embed.set_warmup_status(False)
+
     for cur_iter, (videos, _labels, seq_lens, chosen_steps, video_masks, names) in enumerate(train_loader):
         # NEW shifted video preproc to GPU-side
         view_0, view_1 = videos
@@ -299,6 +316,9 @@ def main():
         t0 = time.time()
         train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summary_writer, train_preproc)
         print('train done in (m): ' + str((time.time()-t0)/60.0))
+        # NOTE - moving checkpoint saving before val and eval for ease of debugging
+        if du.is_root_proc() and ((cur_epoch+1) % cfg.CHECKPOINT.SAVE_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
+            save_checkpoint(cfg, model, optimizer, cur_epoch)
         if not TRAIN_ONLY and ((cur_epoch+1) % cfg.EVAL.VAL_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
             print('running val...')
             t0 = time.time()
@@ -315,8 +335,8 @@ def main():
                 evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
                                 iterator_tasks, embedding_tasks, cur_epoch, summary_writer)
             print('evaluate_once done in (m): ' + str((time.time()-t0)/60.0))
-        if du.is_root_proc() and ((cur_epoch+1) % cfg.CHECKPOINT.SAVE_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
-            save_checkpoint(cfg, model, optimizer, cur_epoch)
+        # if du.is_root_proc() and ((cur_epoch+1) % cfg.CHECKPOINT.SAVE_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
+        #     save_checkpoint(cfg, model, optimizer, cur_epoch)
         du.synchronize()
 
     torch.distributed.destroy_process_group()
