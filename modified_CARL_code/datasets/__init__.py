@@ -79,7 +79,7 @@ def construct_dataloader(cfg, split, mode="auto", no_eval=False):
             val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset) if cfg.NUM_GPUS > 1 else None
             val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.EVAL.BATCH_SIZE, shuffle=False,
                                                     num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None,
-                                                    drop_last=True)
+                                                    drop_last=True) # TODO - enable val_sampler?
             val_eval_dataset = Pouring(cfg, split, mode="eval", sample_all=True)
             val_eval_loader = [torch.utils.data.DataLoader(val_eval_dataset, batch_size=1, shuffle=False,
                                                 num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None)]
@@ -89,7 +89,7 @@ def construct_dataloader(cfg, split, mode="auto", no_eval=False):
             val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset) if cfg.NUM_GPUS > 1 else None
             val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.EVAL.BATCH_SIZE, shuffle=False,
                                                     num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None,
-                                                    drop_last=True)
+                                                    drop_last=True) # TODO - enable val_sampler?
             val_eval_dataset = Finegym(cfg, split, mode="eval", sample_all=True, dataset=val_dataset.dataset)
             val_eval_sampler = torch.utils.data.distributed.DistributedSampler(val_eval_dataset) if cfg.NUM_GPUS > 1 else None
             val_eval_loader = [torch.utils.data.DataLoader(val_eval_dataset, batch_size=1, shuffle=False,
@@ -103,8 +103,12 @@ def construct_dataloader(cfg, split, mode="auto", no_eval=False):
                                             batch_sampler=val_sampler)
             else:
                 val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset) if cfg.NUM_GPUS > 1 else None
+                # val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.EVAL.BATCH_SIZE, shuffle=False,
+                #                                         num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None,
+                #                                         drop_last=True, persistent_workers=False) # NEW - turning on persistent workers
+                # DEBUG TODO TEST - why is val_sampler unused? see above
                 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.EVAL.BATCH_SIZE, shuffle=False,
-                                                        num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=None,
+                                                        num_workers=cfg.DATA.NUM_WORKERS, pin_memory=True, sampler=val_sampler,
                                                         drop_last=True, persistent_workers=True) # NEW - turning on persistent workers
             val_eval_loader = []
             for dataset_name in cfg.DATASETS:

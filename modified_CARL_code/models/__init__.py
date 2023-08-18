@@ -5,9 +5,9 @@ import utils.logging as logging
 
 logger = logging.get_logger(__name__)
 
-def build_model(cfg):
+def build_model(cfg, local_rank=None):
     if cfg.MODEL.EMBEDDER_TYPE == "transformer":
-        model = TransformerModel(cfg)
+        model = TransformerModel(cfg, local_rank)
     else:
         model = BaseModel(cfg)
     return model

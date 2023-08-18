@@ -94,6 +94,10 @@ def construct_scheduler(optimizer, cfg):
                                 (1 + math.cos(math.pi * t / len(iters))) for t in iters])
         lr_schedule = np.concatenate((warmup_lr_schedule, cosine_lr_schedule))
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: lr_schedule[epoch])
+    # NEW - exponential decay
+    elif cfg.OPTIMIZER.LR.DECAY_TYPE == "multiply":
+        dr = cfg.OPTIMIZER.LR.DECAY_RATE
+        return torch.optim.lr_scheduler.MultiplicativeLR(optimizer, lr_lambda=lambda epoch: dr)
     else:
         raise NotImplementedError(
             "Does not support {} scheduler".format(cfg.OPTIMIZER.LR.DECAY_TYPE)

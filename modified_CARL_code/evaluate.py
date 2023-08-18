@@ -3,6 +3,8 @@
 
 import os
 import math
+import time
+import random
 import torch
 import pprint
 import numpy as np
@@ -98,7 +100,9 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
                     metrics[task_name] = {}
                 metrics[task_name][dataset_name] = task.evaluate(dataset, cur_epoch, summary_writer)
 
-            if dataset_name == "pouring" or dataset_name == "baseball_pitch":
+            # if dataset_name == "pouring" or dataset_name == "baseball_pitch":
+            # NEW - disabling alignment visualizations for now
+            if False:
                 print("generating visualization for video alignment")
                 time_stride=10
                 K = 5
@@ -158,6 +162,7 @@ def evaluate():
     cfg.args = args
 
     torch.distributed.init_process_group(backend='nccl', init_method='env://')
+
     # distributed logging and ignore warning message
     logging.setup_logging(cfg.LOGDIR)
     # Setup summary writer.
@@ -182,8 +187,10 @@ def evaluate():
     val_loader, val_emb_loader = construct_dataloader(cfg, "val")
     iterator_tasks, embedding_tasks = get_tasks(cfg)
 
+    t0 = time.time()
     evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
                         iterator_tasks, embedding_tasks, start_epoch, summary_writer)
+    print('evaluate_once done in (m): ' + str((time.time()-t0)/60.0))
 
 if __name__ == '__main__':
     evaluate()

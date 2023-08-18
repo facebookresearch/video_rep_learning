@@ -16,7 +16,6 @@ import psutil
 
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
-# from datasets.new_data_augment import apply_data_augment, apply_ssl_data_augment
 
 # EXPERIMENTAL - TODO - LOCAL SCRATCH CACHE
 USE_SCRATCH_CACHE = False
@@ -39,7 +38,7 @@ PENN_ACTION_LIST = [
     'tennis_serve'
 ]
 
-# add caching of a fixed number of variants per sample
+
 class PennAction(torch.utils.data.Dataset):
     def __init__(self, cfg, split, dataset_name=None, mode="auto", sample_all=False):
         assert split in ["train", "val", "test"]
@@ -68,50 +67,32 @@ class PennAction(torch.utils.data.Dataset):
             print(list(hist))
 
         self.num_frames = cfg.TRAIN.NUM_FRAMES
-        # OLD AUGMENTATION METHOD
+        
         # Perform data-augmentation
+        # NEW - for training, preproc has been moved to run GPU-side for efficiency
         if self.cfg.SSL and self.mode=="train":
-            self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+            # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+            self.data_preprocess = None
         elif self.mode=="train":
-            self.data_preprocess = create_data_augment(cfg, augment=True)
+            # self.data_preprocess = create_data_augment(cfg, augment=True)
+            self.data_preprocess = None
         else:
             self.data_preprocess = create_data_augment(cfg, augment=False)
-        # NEW AUGMENTATION METHOD
-        # if self.cfg.SSL:
-        #     self.data_preprocess = apply_ssl_data_augment
-        # else:
-        #     self.data_preprocess = apply_data_augment
+
         self.augment = (self.mode=="train")
 
         if 'tcn' in cfg.TRAINING_ALGO:
             self.num_frames = self.num_frames // 2
 
-        # NEW - add optional caching of pre-processed videos to accelerate training
-        # to enable, add "CACHE_VARIANTS" > 0 to the cfg.DATA
-        if 'CACHE_VARIANTS' in self.cfg.DATA:
-            self.nvariants = self.cfg.DATA.CACHE_VARIANTS
-            self.use_cache = True
-            print('Using data pre-caching with ' + str(self.nvariants) + ' variants')
-        else:
-            self.nvariants = 0
-            self.use_cache = False
-        if self.use_cache:
-            self.cache_dir = os.path.join(self.cfg.PATH_TO_DATASET, "cache")
-            os.makedirs(self.cache_dir, exist_ok=True)
-        if not self.augment:
-            self.nvariants = 1
-
         # NEW - EXPERIMENTAL - SCRATCH CACHE
         if USE_SCRATCH_CACHE:
             print('SCRATCH CACHE ENABLED')
 
+
+
     def __len__(self):
         return len(self.dataset)
 
-
-    # NEW get preproc
-    def get_preproc(self):
-        return self.data_preprocess
 
 
     # NEW modified to return videos without pre-processing, so preprocessing can be handled on GPU-side
@@ -124,34 +105,8 @@ class PennAction(torch.utils.data.Dataset):
         frame_label = self.dataset[index]["frame_label"]
         seq_len = self.dataset[index]["seq_len"]
         video_file = os.path.join(self.cfg.PATH_TO_DATASET, self.dataset[index]["video_file"])
-        
-        # OLD CACHE SYSTEM FOR FULLY PRE-PROC FILES
-        # TODO REMOVE
-        # if self.use_cache:
-        #     if self.cfg.SSL and not self.sample_all:
-        #         sub_cache = 'ssl'
-        #     else:
-        #         sub_cache = 'not_ssl'
-        #     cur_cache = os.path.join(self.cache_dir, sub_cache, self.dataset[index]["video_file"]+'_cache')
-        #     os.makedirs(cur_cache, exist_ok=True)
-        #     variants = os.listdir(cur_cache)
-        #     nv = len(variants)
-        #     if nv >= self.nvariants:
-        #         i = random.randint(0, nv-1)
-        #         cache_file = os.path.join(cur_cache, variants[i])
-        #         with open(cache_file, 'rb') as f:
-        #             try:
-        #                 ret_data = pickle.load(f)
-        #             except:
-        #                 print('WARNING: corrupted cache file:')
-        #                 print(cache_file)
-        #                 exit()
-        #         return ret_data
-        #     else:
-        #         out_cache = os.path.join(cur_cache, '%03i.pkl'%nv)
 
         # NEW CACHE SYSTEM FOR DECODED VIDEOS ON LOCAL DRIVE
-        # TODO UPDATE SETTINGS
         cache_dir = '/scratch/mwalmer/temp/' # TODO - add setting
         cache_file = os.path.join(cache_dir, self.dataset[index]["video_file"]+'_cache.pkl')
         if USE_SCRATCH_CACHE and os.path.isfile(cache_file):
@@ -166,79 +121,28 @@ class PennAction(torch.utils.data.Dataset):
                 os.makedirs(cur_cache, exist_ok=True)
                 with open(cache_file, 'wb') as f:
                     pickle.dump(video, f)
-        # TODO - add switch to turn this on and off
 
-        # DEBUG - work towards caching the decoded video...
-        # print(video)
-        # print(video_file)
-        # print(video.shape)
-
-        # print(video_file + ' loading done')
-        # print(time.time()-t0)
-        # t0 = time.time()
-
+        # NOTE - moved pre-proc to run GPU-side for efficiency
         if self.cfg.SSL and not self.sample_all:
-            t0 = time.time()
             names = [name, name]
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
-            
-            # print('video size:')
-            # print(video.shape)
-            # print('sample0: ' + str(time.time()-t0))
-            # print('CPU: ' + str(psutil.Process().cpu_num()))
-            # print('CPU Count: ' + str(psutil.cpu_count()))
-            # print(psutil.cpu_percent(percpu=True))
-            # print('-----')
-            t0 = time.time()
 
-            # view_0 = self.data_preprocess(video[steps_0.long()])
-            # view_0 = self.data_preprocess(video[steps_0.long()], self.cfg, self.augment)
-            # view_0 = apply_ssl_data_augment(video[steps_0.long()], self.cfg, self.augment)
             view_0 = video[steps_0.long()]
-
-            # print('preproc0: ' + str(time.time()-t0))
-            # print('CPU: ' + str(psutil.Process().cpu_num()))
-            # print('-----')
-            # t0 = time.time()
-
             label_0 = frame_label[chosen_step_0.long()]
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
 
-            # print('sample1')
-            # print(time.time()-t0)
-            # t0 = time.time()
-
             # view_1 = self.data_preprocess(video[steps_1.long()])
-            # view_1 = self.data_preprocess(video[steps_1.long()], self.cfg, self.augment)
-            # view_1 = apply_ssl_data_augment(video[steps_1.long()], self.cfg, self.augment)
             view_1 = video[steps_1.long()]
-
-            # print('preproc1')
-            # print(time.time()-t0)
-            # t0 = time.time()
-
             label_1 = frame_label[chosen_step_1.long()]
+            
             # videos = torch.stack([view_0, view_1], dim=0)
             videos = (view_0, view_1)
+            
             labels = torch.stack([label_0, label_1], dim=0)
             seq_lens = torch.tensor([seq_len, seq_len])
             chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)
             video_mask = torch.stack([video_mask0, video_mask1], dim=0)
 
-            # print('stacking')
-            # print(time.time()-t0)
-            # print('----------')
-            # t0 = time.time()
-
-            # print(video_file + ' sampling and preproc done')
-            # print(time.time()-t0)
-            # t0 = time.time()
-            # print('----------')
-
-            if self.use_cache:
-                ret_data = (videos, labels, seq_lens, chosen_steps, video_mask, names)
-                with open(out_cache, 'wb') as f:
-                    pickle.dump(ret_data, f)
             return videos, labels, seq_lens, chosen_steps, video_mask, names
 
         elif not self.sample_all:
@@ -256,12 +160,9 @@ class PennAction(torch.utils.data.Dataset):
         if self.cfg.DATA.FRAME_LABELS:
             label = frame_label[chosen_steps.long()]
 
-        # TODO - REMOVE OLD CACHE STUFF
-        # if self.use_cache:
-        #     ret_data = (video, label, torch.tensor(seq_len), chosen_steps, video_mask, name)
-        #     with open(out_cache, 'wb') as f:
-        #         pickle.dump(ret_data, f)
         return video, label, torch.tensor(seq_len), chosen_steps, video_mask, name
+
+
 
     def sample_frames(self, seq_len, num_frames, pre_steps=None):
         # When dealing with very long videos we can choose to sub-sample to fit

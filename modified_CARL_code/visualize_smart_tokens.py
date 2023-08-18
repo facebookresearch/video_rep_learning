@@ -59,7 +59,7 @@ class FeatureExtractor(torch.nn.Module):
 
 # TODO - remove extra args
 def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
-                    iterator_tasks, embedding_tasks, cur_epoch, summary_writer):
+                    iterator_tasks, embedding_tasks, cur_epoch, summary_writer, samples_per):
     attn_extractor = FeatureExtractor(model, 'module.embed.pooling.cross_att.attn_holder')
 
     max_frames_per_batch = cfg.EVAL.FRAMES_PER_BATCH
@@ -69,14 +69,20 @@ def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_load
         exit(-1)
 
     # get config name
-    temp = cfg.args.cfg_file
-    temp = os.path.splitext(temp)[0]
+    # temp = cfg.args.cfg_file
+    # temp = os.path.splitext(temp)[0]
+    # temp = temp.split('/')[-1]
+    # config_name = temp
+
+    # update: output name based on log-dir, to handle multiple trials
+    temp = cfg.LOGDIR
     temp = temp.split('/')[-1]
     config_name = temp
 
     # visualize for each dataset
     nds = len(val_emb_loader)
     suff = None
+    cur_sample = 1
     for data_i in range(len(val_emb_loader)):
         data_loader = val_emb_loader[data_i]
         if nds > 1:
@@ -106,12 +112,19 @@ def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_load
                 attns = torch.cat(attns, dim=0)
                 valid = (frame_label[0]>=0)
                 attns = attns[valid].numpy()
-                gen_vis(attns, config_name, suff=suff, video_frames=curr_data)                
-                break
+                
+                if samples_per == 1:
+                    gen_vis(attns, config_name, suff=suff, video_frames=curr_data)
+                else:
+                    gen_vis(attns, config_name, suff=suff, video_frames=curr_data, cur_sample=cur_sample)
+
+                if cur_sample >= samples_per:
+                    break
+                cur_sample += 1
                 
 
 
-def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suff=None, video_frames=None):
+def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suff=None, video_frames=None, cur_sample=None):
     if video_frames is not None:
         video_frames = video_frames.cpu().numpy()[0,...]
         vf_min = np.min(video_frames)
@@ -166,12 +179,13 @@ def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suf
         im_f = Image.fromarray(im_f)
         ims.append(im_f)
     # save gif
-    if suff is None:
-        gif_name = os.path.join(cur_out_dir, '%s.gif'%model_name)
-    else:
-        gif_name = os.path.join(cur_out_dir, '%s_%s.gif'%(model_name, suff))
-    # duration = second per frame
-    ims[0].save(gif_name, save_all=True, append_images=ims[1:], duration=1, loop=0)
+    gif_name = os.path.join(cur_out_dir, model_name)
+    if suff is not None:
+        gif_name = gif_name + '_%s'%suff
+    if cur_sample is not None:
+        gif_name = gif_name + '_sample%02i'%cur_sample 
+    gif_name = gif_name + ".gif"
+    ims[0].save(gif_name, save_all=True, append_images=ims[1:], duration=1, loop=0) # duration = second per frame
 
 
 
@@ -212,9 +226,14 @@ def visualize():
     val_loader, val_emb_loader = construct_dataloader(cfg, "val")
     iterator_tasks, embedding_tasks = get_tasks(cfg)
 
+    # For Penn Action, run one vis per category. For other datasets, run 5 sample visualizations
+    samples_per = 1
+    if len(cfg.DATASETS) == 1:
+        samples_per = 5
+
     # TODO - clean up extra args
     run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
-                        iterator_tasks, embedding_tasks, start_epoch, summary_writer)
+            iterator_tasks, embedding_tasks, start_epoch, summary_writer, samples_per)
 
 if __name__ == '__main__':
     visualize()

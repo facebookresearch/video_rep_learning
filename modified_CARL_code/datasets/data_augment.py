@@ -334,8 +334,8 @@ class ComposeOp:
 # ==========
 
 
-# NEW - Op holder for torchvision.transforms.ColorJitter, for better efficiency
-# like RandomOp, takes a prob parameter to control augmentation probability
+# NEW - Op holder for torchvision.transforms.ColorJitter, for better efficiency.
+# Like RandomOp, takes a prob parameter to control augmentation probability
 class ColorJitterOp:
     def __init__(self, prob=0, img_brightness=0, img_contrast=0, img_saturation=0, img_hue=0):
         self.img_brightness = img_brightness
@@ -388,7 +388,6 @@ def create_ssl_data_augment(cfg, augment):
         #     'img_blur': 0.0 if cfg.DATASETS[0] == "finegym" else 0.5*s,
         # }))
         # new color jitter and blur
-        # TODO TEMP
         print('NEW COLOR JITTER LOADED')
         ops.append(ColorJitterOp(0.8,
             img_brightness = 0.8*s,

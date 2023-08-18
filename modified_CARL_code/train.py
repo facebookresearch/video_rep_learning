@@ -4,6 +4,7 @@ import sys
 import pprint
 import torch
 import random
+import datetime
 from tqdm import tqdm
 import time
 import numpy as np
@@ -263,7 +264,9 @@ def main():
     print('args.rank: ' + str(args.rank))
 
     # torch.distributed.init_process_group(backend='nccl', init_method='env://')
-    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank)
+    # torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank)
+    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank,
+        timeout=datetime.timedelta(seconds=72000))
 
     # Set up environment.
     du.init_distributed_training(cfg)
@@ -280,7 +283,7 @@ def main():
     logger.info(pprint.pformat(cfg))
 
     # Build the video model
-    model = build_model(cfg)
+    model = build_model(cfg, args.local_rank)
     torch.cuda.set_device(args.local_rank)
     model = model.cuda()
     # model = model.to(f'cuda:{args.local_rank}')
