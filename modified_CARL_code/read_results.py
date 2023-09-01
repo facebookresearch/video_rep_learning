@@ -153,12 +153,15 @@ def main(args):
         e = epcs[-1]
         cur = []
         for tn in tns:
-            cur.append(all_res[tn][m][e])
-        cur = np.array(cur) * 100
+            cur.append(all_res[tn][m][e] * 100)
+        if args.all:
+            for c in cur: print('%.2f'%c)
+        cur = np.array(cur)
         cur_m = np.mean(cur)
         cur_s = np.std(cur)
         print('%03i : %.2f +- %.2f'%(e, cur_m, cur_s*2))
         print('---')
+
 
     # plot results
     plot_results(all_res, tns, epcs, config_name)

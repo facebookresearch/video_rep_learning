@@ -25,7 +25,8 @@ class K400(torch.utils.data.Dataset):
         self.cfg = cfg
         self.num_contexts = cfg.DATA.NUM_CONTEXTS
         # self.train_dataset = os.path.join(cfg.args.workdir, f"Kinetics400/train.csv")
-        self.train_dataset = os.path.join(cfg.args.workdir, "kinetics_400/k400/annotations/train.csv")
+        # self.train_dataset = os.path.join(cfg.args.workdir, "kinetics_400/k400/annotations/train.csv")
+        self.train_dataset = "/datasets01/kinetics_400/k400/annotations/train.csv"
 
         with open(self.train_dataset, 'r') as f:
             reader = csv.reader(f)
@@ -46,10 +47,15 @@ class K400(torch.utils.data.Dataset):
         #                     "Kinetics400/train/marching/uLaU_15HYdo_000002_000012.mp4",
         #                     "Kinetics400/train/lunge/pNvkk7VDOws_000001_000011.mp4",
         #                     "Kinetics400/train/bandaging/HvaU7W635to_000853_000863.mp4"]
-        self.error_videos = []
+        
+        # load list of missing / error videos
+        self.error_videos = set()
         with open("k400_missing.txt", 'r') as f:
             for line in f:
-                self.error_videos.append(line.strip())
+                self.error_videos.add(line.strip())
+        with open("k400_error_files.txt", 'r') as f:
+            for line in f:
+                self.error_videos.add(line.strip())
 
         for data in dataset:
             if data["video_file"] not in self.error_videos:
@@ -59,7 +65,9 @@ class K400(torch.utils.data.Dataset):
 
         # Perform data-augmentation
         self.num_frames = cfg.TRAIN.NUM_FRAMES
-        self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+        # NEW - for training, preproc has been moved to run GPU-side for efficiency
+        # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+        self.data_preprocess = None
 
     def __len__(self):
         return len(self.dataset)
@@ -68,7 +76,8 @@ class K400(torch.utils.data.Dataset):
         # name = self.dataset[index]["video_file"].split("/")[-1]
         name = self.dataset[index]["video_file"]
 
-        video_file = os.path.join(self.cfg.args.workdir, 'kinetics_400/k400/train', self.dataset[index]["video_file"])
+        # video_file = os.path.join(self.cfg.args.workdir, 'kinetics_400/k400/train', self.dataset[index]["video_file"])
+        video_file = os.path.join('/datasets01/kinetics_400/k400/train', self.dataset[index]["video_file"])
         video, _, info = read_video(video_file, pts_unit='sec')
         seq_len = len(video)
         if seq_len == 0:
@@ -77,6 +86,7 @@ class K400(torch.utils.data.Dataset):
             # NEW: extra handling for empty videos (did not download correctly)
             with open("k400_error_files.txt", 'a') as f:
                 f.write(self.dataset[index]["video_file"] + '\n')
+                print('WARNING: Corrupted file: ' + self.dataset[index]["video_file"])
             # return first video as placeholder to continue run
             return self.__getitem__(0)
 
@@ -85,12 +95,15 @@ class K400(torch.utils.data.Dataset):
         
         names = [name, name]
         steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
-        view_0 = self.data_preprocess(video[steps_0.long()])
+        # view_0 = self.data_preprocess(video[steps_0.long()])
+        view_0 = video[steps_0.long()]
         label_0 = frame_label[chosen_step_0.long()]
         steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
-        view_1 = self.data_preprocess(video[steps_1.long()])
+        # view_1 = self.data_preprocess(video[steps_1.long()])
+        view_1 = video[steps_1.long()]
         label_1 = frame_label[chosen_step_1.long()]
-        videos = torch.stack([view_0, view_1], dim=0)
+        # videos = torch.stack([view_0, view_1], dim=0)
+        videos = (view_0, view_1)
         labels = torch.stack([label_0, label_1], dim=0)
         seq_lens = torch.tensor([seq_len, seq_len])
         chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)

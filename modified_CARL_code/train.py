@@ -22,13 +22,17 @@ from evaluation import get_tasks
 # NEW - externalize data preproc to run on GPU
 from datasets.data_augment import get_data_preprocess
 
+# NEW - TODO - EXPERIMENTAL - plugging in VSP
+# from VSP import PCL
+
 logger = logging.get_logger(__name__)
 
 # NEW: temporary bypass to turn off all val and eval
 TRAIN_ONLY = False
 # NEW: turn off TQDM
 USE_TQDM = False
-
+# NEW: force regular reporting on multi-gpu jobs (for Kinnetics)
+FORCE_REPORT = True
 
 
 # NEW - apply preprocessing ops to views on GPU
@@ -90,7 +94,14 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
             # model.set_warmup_status(False)
             model.module.embed.set_warmup_status(False)
 
+    
     for cur_iter, (videos, _labels, seq_lens, chosen_steps, video_masks, names) in enumerate(train_loader):
+        
+        # DEBUG: limit cur iter for timing
+        if cur_iter == 20:
+            print('DEBUG')
+            break
+
         # NEW shifted video preproc to GPU-side
         view_0, view_1 = videos
 
@@ -156,7 +167,7 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
         tmt[5] += time.time() - t1
         t1 = time.time()
 
-        if cfg.NUM_GPUS == 1 and cur_iter % cfg.LOGGING.REPORT_INTERVAL == 0:
+        if (FORCE_REPORT or cfg.NUM_GPUS == 1) and cur_iter % cfg.LOGGING.REPORT_INTERVAL == 0:
             # print(names)
             logger.info(f"iter {data_size * cur_epoch + cur_iter}, training loss: {loss.item():.3f}")
             # visual_video = videos[0]
@@ -294,6 +305,7 @@ def main():
 
     optimizer = construct_optimizer(model, cfg)
     algo = get_algo(cfg)
+    # algo = PCL(cfg) # NEW - TODO - EXPERIMENTAL - plugging in VSP
 
     # Setup Dataset Iterators from train and val datasets.
     # NEW - externalize data preproc to run on GPU

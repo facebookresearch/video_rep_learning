@@ -70,10 +70,13 @@ class Finegym(torch.utils.data.Dataset):
 
         # Perform data-augmentation
         self.num_frames = cfg.TRAIN.NUM_FRAMES
+        # NEW - for training, preproc has been moved to run GPU-side for efficiency
         if self.cfg.SSL and self.mode=="train":
-            self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+            # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
+            self.data_preprocess = None
         elif self.mode=="train":
-            self.data_preprocess = create_data_augment(cfg, augment=True)
+            # self.data_preprocess = create_data_augment(cfg, augment=True)
+            self.data_preprocess = None
         else:
             self.data_preprocess = create_data_augment(cfg, augment=False)
 
@@ -93,15 +96,19 @@ class Finegym(torch.utils.data.Dataset):
         video, _, info = read_video(video_file, pts_unit='sec')
         video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
         
+        # NOTE - moved pre-proc to run GPU-side for efficiency
         if self.cfg.SSL and not self.sample_all:
             names = [name, name]
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
-            view_0 = self.data_preprocess(video[steps_0.long()])
+            # view_0 = self.data_preprocess(video[steps_0.long()])
+            view_0 = video[steps_0.long()]
             label_0 = frame_label[chosen_step_0.long()]
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
-            view_1 = self.data_preprocess(video[steps_1.long()])
+            # view_1 = self.data_preprocess(video[steps_1.long()])
+            view_1 = video[steps_1.long()]
             label_1 = frame_label[chosen_step_1.long()]
-            videos = torch.stack([view_0, view_1], dim=0)
+            # videos = torch.stack([view_0, view_1], dim=0)
+            videos = (view_0, view_1)
             labels = torch.stack([label_0, label_1], dim=0)
             seq_lens = torch.tensor([seq_len, seq_len])
             chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)

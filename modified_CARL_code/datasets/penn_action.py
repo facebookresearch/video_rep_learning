@@ -1,5 +1,3 @@
-# Modified pre-processing routine to use no objects
-
 # coding=utf-8
 import os
 import math

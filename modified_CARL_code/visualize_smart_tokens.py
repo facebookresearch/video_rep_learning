@@ -184,6 +184,7 @@ def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suf
         gif_name = gif_name + '_%s'%suff
     if cur_sample is not None:
         gif_name = gif_name + '_sample%02i'%cur_sample 
+        print('sample %i'%cur_sample)
     gif_name = gif_name + ".gif"
     ims[0].save(gif_name, save_all=True, append_images=ims[1:], duration=1, loop=0) # duration = second per frame
 
