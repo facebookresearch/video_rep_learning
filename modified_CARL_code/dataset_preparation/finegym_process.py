@@ -13,7 +13,9 @@ import torch
 # NEW - ONLY_CHECK mode: check for all files without processing yet
 ONLY_CHECK = False
 
-def main(split="train", classes="gym99", version="v1.0"):
+# Optional: for debug provide a list of video id's, and only those id's will be processed
+# save_file will not be generated if debug is set
+def main(split="train", classes="gym99", version="v1.0", debug=None):
     # data_root = "/home/username/datasets/finegym"
     data_root = "/fsx/mwalmer/carl_workdir/finegym"
     output_dir = os.path.join(data_root, "processed_videos")
@@ -55,8 +57,19 @@ def main(split="train", classes="gym99", version="v1.0"):
     event_ids = sorted(event_ids)
     print('loaded %i event_ids to process'%len(event_ids))
 
-    warnings = []
+    if debug is not None:
+        print('DEBUG: checking events for videos:')
+        print(debug)
+        new_event_ids = []
+        for e_id in event_ids:
+            for d in debug:
+                if d in e_id:
+                    new_event_ids.append(e_id)
+                    break
+        event_ids = new_event_ids
+        print('found %i events'%len(event_ids))
 
+    warnings = []
     dataset = []
     for i, event_id in tqdm(enumerate(event_ids), total=len(event_ids)):
         
@@ -103,7 +116,6 @@ def main(split="train", classes="gym99", version="v1.0"):
             # NEW: NEED -strict -2
             cmd = f'ffmpeg -hide_banner -loglevel panic -y -ss {start_time}s -to {end_time}s -i {video_file} -strict -2 -c:v copy -c:a copy {temp_output_file_1}'
             # cmd = f'ffmpeg -y -ss {start_time}s -to {end_time}s -i {video_file} -strict -2 -c:v copy -c:a copy {temp_output_file_1}'
-
             os.system(cmd)
             cmd = f'ffmpeg -hide_banner -loglevel panic -y -i {temp_output_file_1} -strict -2 -vf scale=640:360 {temp_output_file_2}'
             os.system(cmd)
@@ -132,7 +144,7 @@ def main(split="train", classes="gym99", version="v1.0"):
         # print(video_file, "\n", output_file)
         print(event_id, start_time, end_time, num_frames, fps, width, height)
         if num_frames == 0:
-            print('WARNING: EMPTY PROCESSED VIDEO: ' + output_file)
+            w = 'WARNING: EMPTY PROCESSED VIDEO: %s'%output_file
             print(w)
             warnings.append(w)
 
@@ -148,7 +160,8 @@ def main(split="train", classes="gym99", version="v1.0"):
             "seq_len": num_frames, "frame_label": frame_label, "event_label": event_data['event']}
         dataset.append(data_dict)
 
-    if ONLY_CHECK: return warnings
+    if ONLY_CHECK or debug is not None: 
+        return warnings
     with open(save_file, 'wb') as f:
         pickle.dump(dataset, f)
     print(f"{len(dataset)} {split} samples of Finegym dataset have been writen.")
@@ -163,13 +176,14 @@ if __name__ == '__main__':
     
     ALL_WARNINGS = []
     # ALL_WARNINGS += main(split="train", classes="gym99", version="v1.0")
-    ALL_WARNINGS += main(split="val", classes="gym99", version="v1.0")
-    # ALL_WARNINGS += main(split="train", classes="gym288", version="v1.0")
-    # ALL_WARNINGS += main(split="val", classes="gym288", version="v1.0")
-
+    # ALL_WARNINGS += main(split="val", classes="gym99", version="v1.0")
+    ALL_WARNINGS += main(split="train", classes="gym288", version="v1.0")
+    ALL_WARNINGS += main(split="val", classes="gym288", version="v1.0")
     print('TOTAL WARNING COUNT: %i'%len(ALL_WARNINGS))
     for W in ALL_WARNINGS:
         print(W)
+
+    
 
     # main(split="train", classes="gym99", version="v1.1")
     # main(split="train", classes="gym288", version="v1.1")

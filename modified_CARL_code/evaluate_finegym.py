@@ -29,6 +29,10 @@ from visualize_retrieval import create_retrieval_video
 
 logger = logging.get_logger(__name__)
 
+# NEW: Optionally re-use cached embedding features
+# Should be used ONLY when debugging EVAL settings
+DEBUG_USE_EXISTING_CACHE = False
+
 class FinegymEval(torch.utils.data.Dataset):
     def __init__(self, cfg, split, data_files):
         self.cfg = cfg
@@ -72,6 +76,14 @@ def get_embeddings_dataset(cfg, model, data_loader, output_dir):
     model.eval()
     with torch.no_grad():
         for video, frame_label, seq_len, _, _, names in data_loader:
+            
+            # NEW - for debugging, use existing cache files
+            output_file = os.path.join(output_dir, names[0]) + '.pkl'
+            if DEBUG_USE_EXISTING_CACHE:
+                if os.path.isfile(output_file):
+                    output_files.append(output_file)
+                    continue
+
             assert video.size(0) == 1 # batch_size==1
             assert video.size(1) == frame_label.size(1) == int(seq_len.item())
             embs = []
@@ -101,7 +113,7 @@ def get_embeddings_dataset(cfg, model, data_loader, output_dir):
                     'labels': frame_label[0],
                     'seq_len': seq_len,
                     'name': names[0]}
-            output_file = os.path.join(output_dir, names[0]) + '.pkl'
+            # output_file = os.path.join(output_dir, names[0]) + '.pkl'
             with open(output_file, 'wb') as f:
                 pickle.dump(data, f)
             output_files.append(output_file)
@@ -122,27 +134,47 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
     
     train_output_dir=os.path.join(cfg.LOGDIR, "finegym_eval_trainset")
     if is_root_proc():
-        if os.path.exists(train_output_dir):
+        if DEBUG_USE_EXISTING_CACHE:
+            print('WARNING: DEBUG_USE_EXISTING_CACHE, will not remove existing cache files in: ' + train_output_dir)
+        elif os.path.exists(train_output_dir):
             shutil.rmtree(train_output_dir)
-        os.makedirs(train_output_dir)
+        os.makedirs(train_output_dir, exist_ok=True)
     synchronize()
-    logger.info(f"generating train embeddings for finegym dataset at {train_output_dir} of epoch {cur_epoch}.")
-    train_files, train_oneset_dataset = get_embeddings_dataset(cfg, model, train_emb_loader[0], train_output_dir)
-    if cfg.NUM_GPUS > 1:
-        train_files = list(chain(*all_gather_unaligned(train_files)))
-        train_oneset_dataset = list(chain(*all_gather_unaligned(train_oneset_dataset)))
+    if DEBUG_USE_EXISTING_CACHE and os.path.exists(train_output_dir) and len(os.listdir(train_output_dir)) > 0:
+        ex_files = os.listdir(train_output_dir)
+        print('Found existing cache dir with %i files'%(len(ex_files)))
+        train_files = []
+        for f in ex_files:
+            train_files.append(os.path.join(train_output_dir, f))
+        train_oneset_dataset = []
+    else:
+        logger.info(f"generating train embeddings for finegym dataset at {train_output_dir} of epoch {cur_epoch}.")
+        train_files, train_oneset_dataset = get_embeddings_dataset(cfg, model, train_emb_loader[0], train_output_dir)
+        if cfg.NUM_GPUS > 1:
+            train_files = list(chain(*all_gather_unaligned(train_files)))
+            train_oneset_dataset = list(chain(*all_gather_unaligned(train_oneset_dataset)))
 
     val_output_dir=os.path.join(cfg.LOGDIR, "finegym_eval_valset")
     if is_root_proc():
-        if os.path.exists(val_output_dir):
+        if DEBUG_USE_EXISTING_CACHE:
+            print('WARNING: DEBUG_USE_EXISTING_CACHE, will not remove existing cache files in: ' + val_output_dir)
+        elif os.path.exists(val_output_dir):
             shutil.rmtree(val_output_dir)
-        os.makedirs(val_output_dir)
+        os.makedirs(val_output_dir, exist_ok=True)
     synchronize()
-    logger.info(f"generating val embeddings for finegym dataset at {val_output_dir} of epoch {cur_epoch}.")
-    val_files, val_oneset_dataset = get_embeddings_dataset(cfg, model, val_emb_loader[0], val_output_dir)
-    if cfg.NUM_GPUS > 1:
-        val_files = list(chain(*all_gather_unaligned(val_files)))
-        val_oneset_dataset = list(chain(*all_gather_unaligned(val_oneset_dataset)))
+    if DEBUG_USE_EXISTING_CACHE and os.path.exists(val_output_dir) and len(os.listdir(val_output_dir)) > 0:
+        ex_files = os.listdir(val_output_dir)
+        print('Found existing cache dir with %i files'%(len(ex_files)))
+        val_files = []
+        for f in ex_files:
+            val_files.append(os.path.join(val_output_dir, f))
+        val_oneset_dataset = []
+    else:
+        logger.info(f"generating val embeddings for finegym dataset at {val_output_dir} of epoch {cur_epoch}.")
+        val_files, val_oneset_dataset = get_embeddings_dataset(cfg, model, val_emb_loader[0], val_output_dir)
+        if cfg.NUM_GPUS > 1:
+            val_files = list(chain(*all_gather_unaligned(val_files)))
+            val_oneset_dataset = list(chain(*all_gather_unaligned(val_oneset_dataset)))
 
     fractions = cfg.EVAL.CLASSIFICATION_FRACTIONS
     if cfg.TRAINING_ALGO == 'classification':
@@ -171,6 +203,8 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
         criterion = torch.nn.CrossEntropyLoss()
         
         optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-6)
+        # optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-6)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
         total_e = cfg.EVAL.CLASSIFICATION_EPOCHS
         train_accs = []
@@ -178,8 +212,10 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
         for e in range(total_e):
             if cfg.NUM_GPUS > 1 and hasattr(train_embs_loader.sampler, 'set_epoch'):
                 train_embs_loader.sampler.set_epoch(e)
+            
             for param_group in optimizer.param_groups:
                 param_group["lr"] = learning_rate * (1 + math.cos(math.pi * e/(1.0*total_e)))/2
+            
             correct = 0.0
             total = 0.0
             for embs, labels in train_embs_loader:
@@ -216,12 +252,16 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
             if e % 10 == 0:
                 logger.info(f'[{e}/{total_e}] classification_{fraction} val set: {accuracy:.3f}% ({correct}/{total})')
         
+        logger.info(f'classification_{fraction}/train: ' + str(train_accuracy))
+        logger.info(f'classification_{fraction}/val: ' + str(accuracy))
         summary_writer.add_scalar(f'classification_{fraction}/train', train_accuracy, cur_epoch)
         summary_writer.add_scalar(f'classification_{fraction}/val', accuracy, cur_epoch)
         torch.cuda.empty_cache()
 
-    if cfg.EVAL.CLASS_NUM == 99 and is_root_proc():
-        evaluate_oneset_data(cfg, val_emb_loader, cur_epoch, summary_writer, val_oneset_dataset)
+    print('EVAL VISUALIZATIONS DISABLED')
+    # TODO - re-enable
+    # if cfg.EVAL.CLASS_NUM == 99 and is_root_proc():
+    #     evaluate_oneset_data(cfg, val_emb_loader, cur_epoch, summary_writer, val_oneset_dataset)
         
     synchronize()
 
@@ -274,7 +314,7 @@ def evaluate():
     """Evaluate embeddings."""
     args = parse_args()
     cfg = load_config(args)
-    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train)
+    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train, args.tempcfg)
     cfg.PATH_TO_DATASET = os.path.join(args.workdir, cfg.PATH_TO_DATASET)
     cfg.NUM_GPUS = torch.cuda.device_count()
     cfg.args = args

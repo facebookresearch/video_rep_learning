@@ -18,15 +18,21 @@ from torchvision.io import read_video
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
+# from utils.dali_loader import dali_load
+from utils.decord_loader import decord_load
+
+
 logger = logging.get_logger(__name__)
 
 class K400(torch.utils.data.Dataset):
-    def __init__(self, cfg):
+    def __init__(self, cfg, local_rank=0):
         self.cfg = cfg
         self.num_contexts = cfg.DATA.NUM_CONTEXTS
         # self.train_dataset = os.path.join(cfg.args.workdir, f"Kinetics400/train.csv")
         # self.train_dataset = os.path.join(cfg.args.workdir, "kinetics_400/k400/annotations/train.csv")
         self.train_dataset = "/datasets01/kinetics_400/k400/annotations/train.csv"
+
+        self.local_rank = local_rank
 
         with open(self.train_dataset, 'r') as f:
             reader = csv.reader(f)
@@ -56,6 +62,7 @@ class K400(torch.utils.data.Dataset):
         with open("k400_error_files.txt", 'r') as f:
             for line in f:
                 self.error_videos.add(line.strip())
+        print('%i known error videos'%len(self.error_videos))
 
         for data in dataset:
             if data["video_file"] not in self.error_videos:
@@ -78,8 +85,16 @@ class K400(torch.utils.data.Dataset):
 
         # video_file = os.path.join(self.cfg.args.workdir, 'kinetics_400/k400/train', self.dataset[index]["video_file"])
         video_file = os.path.join('/datasets01/kinetics_400/k400/train', self.dataset[index]["video_file"])
-        video, _, info = read_video(video_file, pts_unit='sec')
-        seq_len = len(video)
+        # Old loading method:
+        # video, _, info = read_video(video_file, pts_unit='sec')
+        # seq_len = len(video)
+        # video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
+        
+        # get frame count
+        data = cv2.VideoCapture(video_file)
+        seq_len = int(data.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_label = -1 * torch.ones(seq_len)
+
         if seq_len == 0:
             print('ERROR VIDEO:')
             print(video_file)
@@ -90,20 +105,33 @@ class K400(torch.utils.data.Dataset):
             # return first video as placeholder to continue run
             return self.__getitem__(0)
 
-        video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
-        frame_label = -1 * torch.ones(seq_len)
+        # NEW - fast data loading with NVIDIA DALI
+        steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
+        steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
+        s_start = min(int(steps_0[0]), int(steps_1[0]))
+        s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
+        # video = dali_load(video_file, s_start, s_stop+1, device_id=self.local_rank)
+        video = decord_load(video_file, s_start, s_stop+1)
+        # video = decord_load(video_file, s_start, s_stop+1)
+        steps_0 -= s_start
+        steps_1 -= s_start
+        view_0 = video[steps_0]
+        view_1 = video[steps_1]
+        view_0 = view_0.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
+        view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
+        videos = (view_0, view_1)
         
         names = [name, name]
-        steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
+        # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
         # view_0 = self.data_preprocess(video[steps_0.long()])
-        view_0 = video[steps_0.long()]
+        # view_0 = video[steps_0.long()]
         label_0 = frame_label[chosen_step_0.long()]
-        steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
+        # steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
         # view_1 = self.data_preprocess(video[steps_1.long()])
-        view_1 = video[steps_1.long()]
+        # view_1 = video[steps_1.long()]
         label_1 = frame_label[chosen_step_1.long()]
         # videos = torch.stack([view_0, view_1], dim=0)
-        videos = (view_0, view_1)
+        # videos = (view_0, view_1)
         labels = torch.stack([label_0, label_1], dim=0)
         seq_lens = torch.tensor([seq_len, seq_len])
         chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)

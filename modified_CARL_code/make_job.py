@@ -20,11 +20,9 @@ def gen_trial(args, trial_num=None, trial_seed=None):
     assert os.path.isfile(config_path)
     config_name = os.path.basename(config_path).replace('.yml','')
     
-    # select template file
-    if args.one:
-        template_name = "job_template_1gpu.slurm"
-    else:
-        template_name = "job_template_4gpu.slurm"
+    # select template file based on gpus
+    assert args.gpus in [1,4,8]
+    template_name = "job_template_%igpu.slurm"%args.gpus
     
     # generate destination name
     dest_folder = args.dst
@@ -56,6 +54,13 @@ def gen_trial(args, trial_num=None, trial_seed=None):
                 # insert config name
                 line = line.replace('CONFIGNAME',config_name)
 
+                # low priority (learnai) job settings
+                if args.low:
+                    if "#SBATCH --time" in line:
+                        line = "#SBATCH --time=3-00:00:00\n"
+                    if "#SBATCH --partition learnai4p" in line:
+                        line = "#SBATCH --partition learnai\n"
+
                 # append special settings for micro, eval, or trials
                 if "--logdir" in line:
                     special = '\n'
@@ -63,8 +68,8 @@ def gen_trial(args, trial_num=None, trial_seed=None):
                         special = special.replace('\n',' EVAL.VAL_INTERVAL 1 CHECKPOINT.SAVE_INTERVAL 1 TRAIN.MAX_EPOCHS 2\n')
                     if trial_num is not None:
                         special = special.replace('\n',' RNG_SEED %i\n'%trial_seed)
-                    if args.one:
-                        special = special.replace('\n',' TRAIN.BATCH_SIZE 4\n')
+                    # if args.gpus == 1:
+                    #     special = special.replace('\n',' TRAIN.BATCH_SIZE 4\n')
                     if special != '\n':
                         special = " --opts" + special
                         line = line.replace('\n',special)
@@ -72,6 +77,7 @@ def gen_trial(args, trial_num=None, trial_seed=None):
                 # change to eval
                 if args.eval and "train.py" in line:
                     line = line.replace("train.py", "evaluate.py")
+
                 fout.write(line)
     
     # provide launch command
@@ -96,10 +102,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("cfg", help="config file to launch with")
     parser.add_argument("--dst", help="destination folder for job script", default="slurm_jobs")
-    parser.add_argument("--one", help="run as a 1 GPU job", action="store_true")
+    parser.add_argument("--gpus", help="how many GPUs to request (1, 4, or 8) default: 4", default=4, type=int)
     parser.add_argument("--micro", help="make a micro job for debugging", action="store_true")
     parser.add_argument("--eval", help="calls evaluate.py instead of train.py", action="store_true")
     parser.add_argument("--trials", help="how many trials to create", default=3)
     parser.add_argument("--seed", help="random seed to generating per-trial seeds", default=1)
+    parser.add_argument("--low", help="switches the job to a low priority job (learnai)", action="store_true")
     args = parser.parse_args()
     main(args)

@@ -36,6 +36,8 @@ def parse_args():
         default=None,
         nargs=argparse.REMAINDER,
     )
+    # NEW - temp config mode, will run with a temp config and will not read or overwrite existing config in logdir
+    parser.add_argument('--tempcfg', action='store_true', default=False, help='run with specified config instead of existing one (experimental)')
     return parser.parse_args()
 
 def convert_value(value, v):
@@ -98,7 +100,7 @@ def to_dict(config):
     else:
         return config
 
-def setup_train_dir(cfg, logdir, continue_train=False):
+def setup_train_dir(cfg, logdir, continue_train=False, tempcfg=False):
     """Setups directory for training."""
     os.makedirs(logdir, exist_ok=True)
     config_path = os.path.join(logdir, 'config.yml')
@@ -114,6 +116,8 @@ def setup_train_dir(cfg, logdir, continue_train=False):
         with open(config_path, 'w') as config_file:
             config = dict([(k, to_dict(v)) for k, v in cfg.items()])
             yaml.safe_dump(config, config_file, default_flow_style=False)
+    elif tempcfg: # NEW
+        print('tempcfg mode enabled, will ignore existing config file')
     else:
         logger.info('Using config from config.yml that exists in %s.', logdir)
         with open(config_path, 'r') as config_file:

@@ -8,7 +8,7 @@ import timm
 
 from models.resnet_c2d import *
 
-def attention(Q, K, V, mask=None, dropout=None, visual=False):
+def attention(Q, K, V, mask=None, dropout=None, visual=False, disjoint=False):
     # Q, K, V are (B, *(H), seq_len, d_model//H = d_k)
     # mask is     (B,    1,       1,               Ss)
 
@@ -21,6 +21,17 @@ def attention(Q, K, V, mask=None, dropout=None, visual=False):
         sm_input = sm_input.masked_fill(mask == 0, -float('inf'))
 
     softmax = F.softmax(sm_input, dim=-1)
+
+    # optional: enforce disjoint attention add disjoint attention method
+    if disjoint:
+        # argmax to one-hot based on: https://discuss.pytorch.org/t/how-to-convert-argmax-result-to-an-one-hot-matrix/125508
+        nt = softmax.shape[2]
+        pred = torch.argmax(softmax, dim=2)
+        dis_mask = F.one_hot(pred, nt)
+        dis_mask = torch.permute(dis_mask, [0, 1, 3, 2])
+        softmax = softmax * dis_mask
+        # softmax = F.softmax(softmax, dim=-1) # post softmax?
+
     out = softmax.matmul(V)
 
     if dropout is not None:
@@ -542,9 +553,15 @@ class TransformerModel(nn.Module):
             if self.use_cls_res:
                 self.cls_res_res = nn.Linear(cfg.MODEL.BASE_MODEL.OUT_CHANNEL, cfg.MODEL.EMBEDDER_MODEL.EMBEDDING_SIZE)
 
+            # optional: when using original model (self.fusion_type='late') can use either CLS features or spatial features
+            self.late_type = 'cls'
+            if 'LATE_TYPE' in cfg.MODEL.EMBEDDER_MODEL:
+                self.late_type = cfg.MODEL.EMBEDDER_MODEL.LATE_TYPE
+                assert self.late_type in ['cls', 'spatial']
+
             # Select layers to extract and stack if selecting multiple layers.
             # Setting is specified as either as a single block number or a comma-separated list of block numbers (i.e. "9,10,11")
-            if self.fusion_type != 'late':
+            if self.fusion_type != 'late' or self.late_type == 'spatial':
                 if 'SMART_FEATS' not in cfg.MODEL.EMBEDDER_MODEL:
                     print('MODEL.EMBEDDER_MODEL.SMART_FEATS not specified') 
                     print('extracting block 11 output spatial token features')
@@ -566,7 +583,7 @@ class TransformerModel(nn.Module):
             if cfg.MODEL.BASE_MODEL.LAYER < 0 or cfg.MODEL.BASE_MODEL.LAYER >= blk_count:
                 # fully frozen
                 print('backbone fully frozen')
-                if self.fusion_type != 'late':
+                if self.fusion_type != 'late' or self.late_type == 'spatial':
                     model = FeatureExtractor(model, extract_ids)
                 self.backbone = model
                 self.res_finetune = nn.Identity()
@@ -692,7 +709,7 @@ class TransformerModel(nn.Module):
             curr_emb = self.res_finetune(curr_emb)
 
             if self.backbone_type == 'timm':
-                if self.fusion_type == 'late':
+                if self.fusion_type == 'late' and self.late_type == 'cls':
                     # DINO CLS output
                     _, out_c = curr_emb.size()
                     out_h = 1
@@ -802,8 +819,12 @@ class TransformerEmbModel(nn.Module):
         fc_params = cfg.MODEL.EMBEDDER_MODEL.FC_LAYERS
         self.embedding_size = cfg.MODEL.EMBEDDER_MODEL.EMBEDDING_SIZE
         hidden_channels = cfg.MODEL.EMBEDDER_MODEL.HIDDEN_SIZE
-        self.pooling = nn.AdaptiveMaxPool2d(1)
-        
+        assert cfg.MODEL.EMBEDDER_MODEL.FLATTEN_METHOD in ['max_pool','avg_pool']
+        if cfg.MODEL.EMBEDDER_MODEL.FLATTEN_METHOD == 'max_pool':
+            self.pooling = nn.AdaptiveMaxPool2d(1)
+        else:
+            self.pooling = nn.AdaptiveAvgPool2d(1)
+
         self.fc_layers = []
         for channels, activate in fc_params:
             channels = channels*cap_scalar
@@ -828,6 +849,7 @@ class TransformerEmbModel(nn.Module):
         x = x.view(batch_size*num_steps, c, h, w)
 
         x = self.pooling(x)
+
         x = torch.flatten(x, start_dim=1)
         x = self.fc_layers(x)
         x = self.video_emb(x)
@@ -1046,7 +1068,7 @@ class SmartPoolingTransformerEmbModel(nn.Module):
             self.smart_final = 'max'
         else:
             self.smart_final = cfg.MODEL.EMBEDDER_MODEL.SMART_FINAL
-            assert self.smart_final in ['max','one']
+            assert self.smart_final in ['max','one','avg']
 
         # NEW - backbone warmup: only start fine-tuning the backbone after a certain number of epochs
         self.in_backbone_warmup = False
@@ -1137,6 +1159,9 @@ class SmartPoolingTransformerEmbModel(nn.Module):
         elif self.smart_final == 'one':
             # OPTION 2: Take one token "CLS-style"
             x = x[:,0,:,:]
+        elif self.smart_final == 'avg':
+            # OPTION 3: average pool the token dimension
+            x, _ = torch.mean(x, dim=1)
 
         x = x.reshape(batch_size*num_steps, -1)
         x = self.embedding_layer(x)
@@ -1278,7 +1303,7 @@ class SmartPoolingTransformerEmbModelV2(nn.Module):
         print('Using Smart Pooling')
         self.cfg = cfg
         drop_rate = cfg.MODEL.EMBEDDER_MODEL.FC_DROPOUT_RATE
-        
+
         # Number of channel for smart-pooling layers
         if 'SMART_POOL_CHANNELS' not in cfg.MODEL.EMBEDDER_MODEL:
             print('Using default number for SMART_POOL_CHANNELS: 384')
@@ -1353,7 +1378,11 @@ class SmartPoolingTransformerEmbModelV2(nn.Module):
             self.smart_final = 'max'
         else:
             self.smart_final = cfg.MODEL.EMBEDDER_MODEL.SMART_FINAL
-            assert self.smart_final in ['max','one']
+            assert self.smart_final in ['max','one','avg','lin']
+        if self.smart_final == 'lin':
+            # linear reduction layer
+            tt = self.nst + self.nsdt
+            self.lin_final = nn.Linear(tt*hidden_channels, hidden_channels)
 
         # NEW - backbone warmup: only start fine-tuning the backbone after a certain number of epochs
         self.in_backbone_warmup = False
@@ -1435,6 +1464,14 @@ class SmartPoolingTransformerEmbModelV2(nn.Module):
         elif self.smart_final == 'one':
             # OPTION 2: Take one token "CLS-style"
             x = x[:,0,:,:]
+        elif self.smart_final == 'avg':
+            # OPTION 3: average pool the token dimension
+            x = torch.mean(x, dim=1)
+        elif self.smart_final == 'lin':
+            # OPTION 4: linear layer reduction
+            x = torch.movedim(x,1,2)
+            x = torch.reshape(x, [batch_size, num_steps, -1])
+            x = self.lin_final(x)
 
         x = x.reshape(batch_size*num_steps, -1)
         x = self.embedding_layer(x)
@@ -1490,12 +1527,16 @@ class SmartPoolingV2(nn.Module):
         # handle the views separately
         _, nt, nc = x.shape
         x = x.view(batch_size, -1, nt, nc)
-        _, ncc = dyn_in.shape
-        dyn_in = dyn_in.view(batch_size, -1, ncc)
+        if self.nsdt > 0:
+            _, ncc = dyn_in.shape
+            dyn_in = dyn_in.view(batch_size, -1, ncc)
         x_out = []
         for i in range(batch_size):
             x_c = x[i,...]
-            d_c = dyn_in[i,...]
+            if self.nsdt > 0:
+                d_c = dyn_in[i,...]
+            else:
+                d_c = None
             x_c = self.cross_att(x_c, x_c, d_c)
             x_c = x_c[:,0,:,:]
             x_c = torch.movedim(x_c, 2, 1)
@@ -1544,6 +1585,12 @@ class SmartCrossAttentionV2(nn.Module):
             self.pass_through = self.cfg.MODEL.EMBEDDER_MODEL.VAL_PASS
             # TODO DEBUG
             print('VAL_PASS ENABLED')
+
+        # NEW - OPTIONAL: Smart disjoint attention, enforces disjoint attention through max attention mechanism
+        self.disjoint_att = False
+        if "SMART_DISJOINT" in self.cfg.MODEL.EMBEDDER_MODEL:
+            self.disjoint_att = self.cfg.MODEL.EMBEDDER_MODEL.SMART_DISJOINT
+            print('SMART_DISJOINT ENABLED')
 
         self.linear_K2d = nn.Linear(self.d_model_K, self.d_model)
         if self.pass_through:
@@ -1682,13 +1729,14 @@ class SmartCrossAttentionV2(nn.Module):
 
         # (B, H, Sq, d_k) <- (B, H, Sq, d_k), (B, H, Sk, d_k), (B, H, Sv, d_k), Sk = Sv
         if self.visual:
-            ret, self.attn_matrix = attention(Q, K, V, mask, self.dropout, self.visual)
+            ret, self.attn_matrix = attention(Q, K, V, mask, self.dropout, self.visual, disjoint=self.disjoint_att)
             self.attn_matrix = self.attn_matrix.mean(-3)
             _ = self.attn_holder(self.attn_matrix)
         else:
-            ret = attention(Q, K, V, mask, self.dropout)
+            ret = attention(Q, K, V, mask, self.dropout, disjoint=self.disjoint_att)
 
         # DEBUG - check for updates in static query params
+        # TODO - REMOVE
         # print(self.Q_s)
         # print(Q_temp)
 

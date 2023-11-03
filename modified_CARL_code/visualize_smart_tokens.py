@@ -24,8 +24,9 @@ from PIL import Image
 
 # logger = logging.get_logger(__name__)
 
-
-
+# OPTIONAL: export frames as separate images
+EXPORT_FRAMES = True
+EXPORT_INTERVAL = 5
 
 # TODO - move to shared location
 # generic feature extactor wrapper for intermedia layers modified
@@ -113,10 +114,10 @@ def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_load
                 valid = (frame_label[0]>=0)
                 attns = attns[valid].numpy()
                 
+                samp_id = cur_sample
                 if samples_per == 1:
-                    gen_vis(attns, config_name, suff=suff, video_frames=curr_data)
-                else:
-                    gen_vis(attns, config_name, suff=suff, video_frames=curr_data, cur_sample=cur_sample)
+                    samp_id = None                    
+                gen_vis(attns, config_name, suff=suff, video_frames=curr_data, cur_sample=samp_id)
 
                 if cur_sample >= samples_per:
                     break
@@ -142,7 +143,22 @@ def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suf
     ims = []
     vbuffer = None
     for nf in range(n_frames):
+        
+        # OPTIONAL: Export separate frames
+        export_cur = False
+        if EXPORT_FRAMES and nf%EXPORT_INTERVAL == 0:
+            export_cur = True
+            sd = '_'
+            if suff is not None:
+                sd = sd + '_%s'%suff
+            if cur_sample is not None:
+                sd = sd + '_sample%02i'%cur_sample
+            cur_frame_out_dir = os.path.join(cur_out_dir, sd, 'frame_%05i'%nf)
+            os.makedirs(cur_frame_out_dir, exist_ok=True)
+
         ims_f = []
+
+        # Video Frame        
         if video_frames is not None:
             ims_f.append(video_frames[nf,...])
             w = video_frames.shape[2]
@@ -150,6 +166,14 @@ def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suf
             if vbuffer is None:
                 vbuffer = np.ones([3,h,10], dtype=np.uint8)*255
             ims_f.append(vbuffer)
+            if export_cur:
+                cur_f = video_frames[nf,...]
+                cur_f = np.moveaxis(cur_f,0,-1)
+                cur_f = Image.fromarray(cur_f)
+                out_f = os.path.join(cur_frame_out_dir, 'input.png')
+                cur_f.save(out_f)
+ 
+        # Tokens
         for nt in range(n_toks):
             v = attns[nf, nt, :]
             v = np.reshape(v, [hw, hw])
@@ -173,6 +197,13 @@ def gen_vis(attns, model_name='temp', out_dir='smart_token_vis', upscale=10, suf
             if vbuffer is None:
                 vbuffer = np.ones([3,h,10], dtype=np.uint8)*255
             ims_f.append(vbuffer)
+            if export_cur:
+                cur_f = im
+                cur_f = np.moveaxis(cur_f,0,-1)
+                cur_f = Image.fromarray(cur_f)
+                out_f = os.path.join(cur_frame_out_dir, 'token_%02i.png'%nt)
+                cur_f.save(out_f)
+
         ims_f.pop(-1)
         im_f = np.concatenate(ims_f, axis=2)
         im_f = np.moveaxis(im_f, 0, -1)

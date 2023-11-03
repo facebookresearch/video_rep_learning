@@ -1,5 +1,7 @@
 # coding=utf-8
 import os
+import sys
+import shutil
 import cv2
 import math
 import time
@@ -10,14 +12,20 @@ import torch
 import torch.nn.functional as F
 import torch.distributed as dist
 from torchvision.io import read_video
+import torchvision
 
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
+# from utils.dali_loader import dali_load
+from utils.decord_loader import decord_load
+
 logger = logging.get_logger(__name__)
 
+
+
 class Finegym(torch.utils.data.Dataset):
-    def __init__(self, cfg, split, mode="auto", sample_all=False, dataset=None):
+    def __init__(self, cfg, split, mode="auto", sample_all=False, dataset=None, local_rank=0):
         assert split in ["train", "val"]
         self.cfg = cfg
         self.split = split
@@ -30,6 +38,9 @@ class Finegym(torch.utils.data.Dataset):
         self.train_dataset = os.path.join(cfg.PATH_TO_DATASET, f"gym{cfg.EVAL.CLASS_NUM}_train_v1.0.pkl")
         self.val_dataset = os.path.join(cfg.PATH_TO_DATASET, f"gym{cfg.EVAL.CLASS_NUM}_val.pkl")
         self.additional_dataset = os.path.join(cfg.PATH_TO_DATASET, f"additional_v1.0.pkl")
+
+        # NEW - track local rank for DALI multi-GPU
+        self.local_rank = local_rank
 
         self.error_videos = []
         if dataset is None:
@@ -44,17 +55,20 @@ class Finegym(torch.utils.data.Dataset):
                     dataset = pickle.load(f)
 
             self.dataset = []
-            for data in tqdm(dataset, total=len(dataset)):
-                try:
-                    video_file = os.path.join(self.cfg.PATH_TO_DATASET, data["video_file"])
-                    video = cv2.VideoCapture(video_file)
-                    seq_len = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-                    assert seq_len > 0
-                except:
-                    self.error_videos.append(data["video_file"])
-                else:
-                    self.dataset.append(data)
-            print(self.error_videos)
+            # NOTE - added error checking into the data pre-processing, so this check is not needed anymore
+            # for data in tqdm(dataset, total=len(dataset)):
+            #     try:
+            #         video_file = os.path.join(self.cfg.PATH_TO_DATASET, data["video_file"])
+            #         video = cv2.VideoCapture(video_file)
+            #         seq_len = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+            #         assert seq_len > 0
+            #     except:
+            #         self.error_videos.append(data["video_file"])
+            #     else:
+            #         self.dataset.append(data)
+            # print(self.error_videos)
+            for data in dataset:
+                self.dataset.append(data)
             
             logger.info(f"{len(self.dataset)} {self.split} samples of Finegym dataset have been read.")
             seq_lens = [int(data['seq_len']) for data in self.dataset]
@@ -93,22 +107,36 @@ class Finegym(torch.utils.data.Dataset):
         frame_label = self.dataset[index]["frame_label"]
         seq_len = int(self.dataset[index]["seq_len"])
         video_file = os.path.join(self.cfg.PATH_TO_DATASET, self.dataset[index]["video_file"])
-        video, _, info = read_video(video_file, pts_unit='sec')
-        video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
         
-        # NOTE - moved pre-proc to run GPU-side for efficiency
         if self.cfg.SSL and not self.sample_all:
-            names = [name, name]
+
+            # NEW - fast data loading with NVIDIA DALI
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
-            # view_0 = self.data_preprocess(video[steps_0.long()])
-            view_0 = video[steps_0.long()]
-            label_0 = frame_label[chosen_step_0.long()]
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
+            s_start = min(int(steps_0[0]), int(steps_1[0]))
+            s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
+            # video = dali_load(video_file, s_start, s_stop+1, device_id=self.local_rank)
+            video = decord_load(video_file, s_start, s_stop+1)
+            steps_0 -= s_start
+            steps_1 -= s_start
+            view_0 = video[steps_0]
+            view_1 = video[steps_1]
+            view_0 = view_0.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
+            view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
+            videos = (view_0, view_1)
+
+            # NOTE - moved pre-proc to run GPU-side for efficiency
+            names = [name, name]
+            # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
+            # view_0 = self.data_preprocess(video[steps_0.long()])
+            # view_0 = video[steps_0.long()]
+            label_0 = frame_label[chosen_step_0.long()]
+            # steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
             # view_1 = self.data_preprocess(video[steps_1.long()])
-            view_1 = video[steps_1.long()]
+            # view_1 = video[steps_1.long()]
             label_1 = frame_label[chosen_step_1.long()]
             # videos = torch.stack([view_0, view_1], dim=0)
-            videos = (view_0, view_1)
+            # videos = (view_0, view_1)
             labels = torch.stack([label_0, label_1], dim=0)
             seq_lens = torch.tensor([seq_len, seq_len])
             chosen_steps = torch.stack([chosen_step_0, chosen_step_1], dim=0)
@@ -122,6 +150,20 @@ class Finegym(torch.utils.data.Dataset):
             seq_len = len(steps)
             chosen_steps = steps.clone()
             video_mask = torch.ones(seq_len)
+
+        # NEW - PATH 2: Full video loading for inference
+
+        # load old way:
+        # video, _, info = read_video(video_file, pts_unit='sec')
+        # video = video.permute(0,3,1,2).float() / 255.0 
+        # print(video.shape)
+
+        # load new way:
+        # video = dali_load(video_file, steps[0], steps[-1]+1, device_id=self.local_rank)
+        video = decord_load(video_file, steps[0], steps[-1]+1)
+        video = video.permute(0,3,1,2).float() / 255.0
+        # print(video.shape)
+        # print('-')
         
         # Select data based on steps
         video = video[steps.long()]

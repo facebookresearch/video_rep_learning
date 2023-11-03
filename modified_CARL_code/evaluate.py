@@ -156,7 +156,7 @@ def evaluate():
     """Evaluate embeddings."""
     args = parse_args()
     cfg = load_config(args)
-    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train)
+    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train, args.tempcfg)
     cfg.PATH_TO_DATASET = os.path.join(args.workdir, cfg.PATH_TO_DATASET)
     cfg.NUM_GPUS = torch.cuda.device_count()
     cfg.args = args

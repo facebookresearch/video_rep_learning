@@ -26,4 +26,7 @@ pip install --force-reinstall av
 
 # Update TIMM:
 pip install timm==0.9.2
+
+# Install Decord:
+pip install decord
 ```

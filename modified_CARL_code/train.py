@@ -22,8 +22,7 @@ from evaluation import get_tasks
 # NEW - externalize data preproc to run on GPU
 from datasets.data_augment import get_data_preprocess
 
-# NEW - TODO - EXPERIMENTAL - plugging in VSP
-# from VSP import PCL
+# import multiprocessing as mp
 
 logger = logging.get_logger(__name__)
 
@@ -32,7 +31,7 @@ TRAIN_ONLY = False
 # NEW: turn off TQDM
 USE_TQDM = False
 # NEW: force regular reporting on multi-gpu jobs (for Kinnetics)
-FORCE_REPORT = True
+FORCE_REPORT = False
 
 
 # NEW - apply preprocessing ops to views on GPU
@@ -77,15 +76,15 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
     for i in range(10):
         tmt[i] = 0.0
 
-    # NEW / EXPERIMENTAL TODO - backbone warmup check
+    # NEW / EXPERIMENTAL - backbone warmup check
     if "BACKBONE_WARMUP" in cfg.TRAIN:
-        # TODO - currently only supported for smart fusion
+        # currently only supported for smart fusion
         if not cfg.MODEL.EMBEDDER_MODEL.FUSION_TYPE == 'smart':
             print('INVALID CONFIG: BACKBONE_WARMUP only supported for MODEL.EMBEDDER_MODEL.FUSION_TYPE: smart')
             exit(-1)
         elif cur_epoch < cfg.TRAIN.BACKBONE_WARMUP:
             print('BACKBONE_WARMUP: currently in warmup')
-            # model.embed.in_backbone_warmup = True # TODO - handle a better way
+            # model.embed.in_backbone_warmup = True
             # model.set_warmup_status(True)
             model.module.embed.set_warmup_status(True)
         else:
@@ -97,10 +96,10 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
     
     for cur_iter, (videos, _labels, seq_lens, chosen_steps, video_masks, names) in enumerate(train_loader):
         
-        # DEBUG: limit cur iter for timing
-        if cur_iter == 20:
-            print('DEBUG')
-            break
+        # # DEBUG: limit cur iter for timing - TODO - REMOVE
+        # if cur_iter == 20:
+        #     print('DEBUG - limiting to first 20 training samples')
+        #     break
 
         # NEW shifted video preproc to GPU-side
         view_0, view_1 = videos
@@ -167,7 +166,7 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
         tmt[5] += time.time() - t1
         t1 = time.time()
 
-        if (FORCE_REPORT or cfg.NUM_GPUS == 1) and cur_iter % cfg.LOGGING.REPORT_INTERVAL == 0:
+        if (FORCE_REPORT or cfg.NUM_GPUS == 1) and (cur_iter % cfg.LOGGING.REPORT_INTERVAL == 0):
             # print(names)
             logger.info(f"iter {data_size * cur_epoch + cur_iter}, training loss: {loss.item():.3f}")
             # visual_video = videos[0]
@@ -206,18 +205,10 @@ def val(cfg, val_loader, model, algo, cur_epoch, summary_writer, data_preprocess
     with torch.no_grad():
         for cur_iter, (videos, labels, seq_lens, chosen_steps, video_masks, names) in enumerate(val_loader):
             
-            # TODO - this currently only supports batch size = 1
-
-            # # NEW shifted video preproc to GPU-side
-            # view_0 = videos[0][0,...]
-            # view_1 = videos[1][0,...]
-            # view_0 = view_0.cuda()
-            # view_0 = data_preprocess(view_0)
-            # view_1 = view_1.cuda()
-            # view_1 = data_preprocess(view_1)
-            # videos = torch.stack([view_0, view_1], dim=0)
-            # videos = torch.unsqueeze(videos, 0)
-            # TODO - clean up
+            # DEBUG: limit cur iter for timing - TODO - REMOVE
+            # if cur_iter == 100:
+            #     print('DEBUG - limiting to first 100 val samples')
+            #     break
 
             # NEW shifted video preproc to GPU-side
             view_0 = videos[0]
@@ -256,14 +247,24 @@ def val(cfg, val_loader, model, algo, cur_epoch, summary_writer, data_preprocess
     logger.info("epoch {}, val loss: {:.3f}".format(cur_epoch, total_loss["loss"]))
 
 def main():
+    # Due to limitations with DALI and CUDA, need to switch from "fork" mode to "spawn"
+    # multiprocessing mode to allow multiple workers with DALI
+    # mp.set_start_method('spawn')
+    # NOTE: 0 worker mode works okay
+
     args = parse_args()
     cfg = load_config(args)
-    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train)
+    setup_train_dir(cfg, cfg.LOGDIR, args.continue_train, args.tempcfg)
     cfg.PATH_TO_DATASET = os.path.join(args.workdir, cfg.PATH_TO_DATASET)
     cfg.NUM_GPUS = torch.cuda.device_count() # num_gpus_per_machine
     args.world_size = int(os.getenv('WORLD_SIZE')) # total_gpus
     print('NUM_GPUS: ' + str(cfg.NUM_GPUS))
     print('WORLD_SIZE:' + str(args.world_size))
+
+    # extra reporting for long kinetics epochs
+    global FORCE_REPORT
+    if cfg.DATASETS[0] == 'kinetics400':
+        FORCE_REPORT = True
 
     if os.environ.get('OMPI_COMM_WORLD_SIZE') is None:
         args.rank = args.local_rank
@@ -273,6 +274,11 @@ def main():
     logger.info(f'Node info: rank {args.rank} of world size {args.world_size}')
     cfg.args = args
     print('args.rank: ' + str(args.rank))
+
+    # # for datasets using NVIDIA DALI loading, override NUM_WORKERS to 0
+    # if cfg.DATASETS[0] in ['finegym', 'kinetics400'] and cfg.DATA.NUM_WORKERS != 0:
+    #     print('WARNING: for dataset %s overriding NUM_WORKERS to 0 for NVIDIA DALI loading'%cfg.DATASETS[0])
+    #     cfg.DATA.NUM_WORKERS = 2
 
     # torch.distributed.init_process_group(backend='nccl', init_method='env://')
     # torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank)
@@ -305,14 +311,13 @@ def main():
 
     optimizer = construct_optimizer(model, cfg)
     algo = get_algo(cfg)
-    # algo = PCL(cfg) # NEW - TODO - EXPERIMENTAL - plugging in VSP
 
     # Setup Dataset Iterators from train and val datasets.
     # NEW - externalize data preproc to run on GPU
-    train_loader, train_emb_loader = construct_dataloader(cfg, "train", no_eval=TRAIN_ONLY)
+    train_loader, train_emb_loader = construct_dataloader(cfg, "train", no_eval=TRAIN_ONLY, local_rank=args.local_rank)
     train_preproc = get_data_preprocess(cfg, "train")
     if not TRAIN_ONLY:
-        val_loader, val_emb_loader = construct_dataloader(cfg, "val")
+        val_loader, val_emb_loader = construct_dataloader(cfg, "val", local_rank=args.local_rank)
         val_preproc = get_data_preprocess(cfg, "val")
     iterator_tasks, embedding_tasks = get_tasks(cfg)
 
@@ -337,8 +342,12 @@ def main():
         if not TRAIN_ONLY and ((cur_epoch+1) % cfg.EVAL.VAL_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
             print('running val...')
             t0 = time.time()
-            val(cfg, val_loader, model, algo, cur_epoch, summary_writer, val_preproc)
-            print('val done in (m): ' + str((time.time()-t0)/60.0))
+            
+            # DEBUG - val taking longer than expected. disabling temporarily TODO
+            print('DEBUG: val disabled')
+            # val(cfg, val_loader, model, algo, cur_epoch, summary_writer, val_preproc)
+            # print('val done in (m): ' + str((time.time()-t0)/60.0))
+
             print('running evaluate_once...')
             t0 = time.time()
             if cfg.DATASETS[0] == "finegym":
