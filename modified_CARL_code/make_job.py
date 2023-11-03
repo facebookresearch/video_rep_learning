@@ -1,5 +1,5 @@
-# helper script to automate the generation of job launching scripts
-# NEW: use the "--micro" flag to make a micro job for debugging (2 training epochs)
+# Helper script to automate the generation of job launching scripts.
+# use the "--micro" flag to make a micro job for debugging (2 training epochs)
 import argparse
 import os
 import random

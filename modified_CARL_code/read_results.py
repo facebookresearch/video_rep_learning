@@ -1,4 +1,4 @@
-# read multiple log files for multiple trials and report the combined results ± 2stdev
+# helper to read multiple log files for multiple trials and report the combined results ± 2stdev
 import argparse
 import os
 import numpy as np
@@ -18,11 +18,6 @@ def gather_res(log_dir, folder, all_res, metrics, fg=False):
     max_e = -1
     with open(fp, 'r') as f:
         for line in f:
-            # # check for epoch on val loss line
-            # if 'val loss' in line:
-            #     l = line.split(', val loss')[0]
-            #     l = l.split('epoch ')[-1]
-            #     cur_e = int(l) + 1
             # check for epoch on train line
             if 'Traning epoch' in line:
                 l = line.split('Traning epoch ')[-1]

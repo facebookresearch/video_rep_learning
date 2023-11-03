@@ -19,10 +19,8 @@ from datasets import construct_dataloader, unnorm
 from algos import get_algo
 from evaluation import get_tasks
 
-# NEW - externalize data preproc to run on GPU
+# CHANGE: external data preproc to run on GPU
 from datasets.data_augment import get_data_preprocess
-
-# import multiprocessing as mp
 
 logger = logging.get_logger(__name__)
 
@@ -34,7 +32,7 @@ USE_TQDM = False
 FORCE_REPORT = False
 
 
-# NEW - apply preprocessing ops to views on GPU
+# CHANGE: apply preprocessing ops to views on GPU
 def preproc_views(view_0, view_1, data_preprocess):
     bsize = view_0.size()[0]
     view_0 = view_0.cuda()
@@ -76,7 +74,7 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
     for i in range(10):
         tmt[i] = 0.0
 
-    # NEW / EXPERIMENTAL - backbone warmup check
+    # NEW (OPTIONAL) - backbone warmup
     if "BACKBONE_WARMUP" in cfg.TRAIN:
         # currently only supported for smart fusion
         if not cfg.MODEL.EMBEDDER_MODEL.FUSION_TYPE == 'smart':
@@ -84,24 +82,14 @@ def train(cfg, train_loader, model, optimizer, scheduler, algo, cur_epoch, summa
             exit(-1)
         elif cur_epoch < cfg.TRAIN.BACKBONE_WARMUP:
             print('BACKBONE_WARMUP: currently in warmup')
-            # model.embed.in_backbone_warmup = True
-            # model.set_warmup_status(True)
             model.module.embed.set_warmup_status(True)
         else:
             print('BACKBONE_WARMUP: warmup ended')
-            # model.embed.in_backbone_warmup = False
-            # model.set_warmup_status(False)
             model.module.embed.set_warmup_status(False)
 
     
     for cur_iter, (videos, _labels, seq_lens, chosen_steps, video_masks, names) in enumerate(train_loader):
-        
-        # # DEBUG: limit cur iter for timing - TODO - REMOVE
-        # if cur_iter == 20:
-        #     print('DEBUG - limiting to first 20 training samples')
-        #     break
-
-        # NEW shifted video preproc to GPU-side
+        # CHANGE: shifted video preproc to GPU-side
         view_0, view_1 = videos
 
         tmc += 1
@@ -199,18 +187,8 @@ def val(cfg, val_loader, model, algo, cur_epoch, summary_writer, data_preprocess
     data_size = len(val_loader)
     total_loss = {}
 
-    # NEW run preproc on GPU side
-    # data_preprocess = val_loader.dataset.get_preproc()
-
     with torch.no_grad():
         for cur_iter, (videos, labels, seq_lens, chosen_steps, video_masks, names) in enumerate(val_loader):
-            
-            # DEBUG: limit cur iter for timing - TODO - REMOVE
-            # if cur_iter == 100:
-            #     print('DEBUG - limiting to first 100 val samples')
-            #     break
-
-            # NEW shifted video preproc to GPU-side
             view_0 = videos[0]
             view_1 = videos[1]
             videos = preproc_views(view_0, view_1, data_preprocess)
@@ -247,11 +225,6 @@ def val(cfg, val_loader, model, algo, cur_epoch, summary_writer, data_preprocess
     logger.info("epoch {}, val loss: {:.3f}".format(cur_epoch, total_loss["loss"]))
 
 def main():
-    # Due to limitations with DALI and CUDA, need to switch from "fork" mode to "spawn"
-    # multiprocessing mode to allow multiple workers with DALI
-    # mp.set_start_method('spawn')
-    # NOTE: 0 worker mode works okay
-
     args = parse_args()
     cfg = load_config(args)
     setup_train_dir(cfg, cfg.LOGDIR, args.continue_train, args.tempcfg)
@@ -313,7 +286,7 @@ def main():
     algo = get_algo(cfg)
 
     # Setup Dataset Iterators from train and val datasets.
-    # NEW - externalize data preproc to run on GPU
+    # CHANGE - move data preproc to run on GPU
     train_loader, train_emb_loader = construct_dataloader(cfg, "train", no_eval=TRAIN_ONLY, local_rank=args.local_rank)
     train_preproc = get_data_preprocess(cfg, "train")
     if not TRAIN_ONLY:
@@ -342,11 +315,9 @@ def main():
         if not TRAIN_ONLY and ((cur_epoch+1) % cfg.EVAL.VAL_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
             print('running val...')
             t0 = time.time()
-            
-            # DEBUG - val taking longer than expected. disabling temporarily TODO
-            print('DEBUG: val disabled')
-            # val(cfg, val_loader, model, algo, cur_epoch, summary_writer, val_preproc)
-            # print('val done in (m): ' + str((time.time()-t0)/60.0))
+
+            val(cfg, val_loader, model, algo, cur_epoch, summary_writer, val_preproc)
+            print('val done in (m): ' + str((time.time()-t0)/60.0))
 
             print('running evaluate_once...')
             t0 = time.time()
@@ -359,6 +330,7 @@ def main():
                 evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
                                 iterator_tasks, embedding_tasks, cur_epoch, summary_writer)
             print('evaluate_once done in (m): ' + str((time.time()-t0)/60.0))
+        # CHANGE: moved checkpoint saving to before VAL and EVAL
         # if du.is_root_proc() and ((cur_epoch+1) % cfg.CHECKPOINT.SAVE_INTERVAL == 0 or cur_epoch == cfg.TRAIN.MAX_EPOCHS-1):
         #     save_checkpoint(cfg, model, optimizer, cur_epoch)
         du.synchronize()

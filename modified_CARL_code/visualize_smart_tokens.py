@@ -20,15 +20,12 @@ from visualize_retrieval import create_retrieval_video
 
 from PIL import Image
 
-# TODO - clean up import block
-
-# logger = logging.get_logger(__name__)
-
 # OPTIONAL: export frames as separate images
-EXPORT_FRAMES = True
+EXPORT_FRAMES = False
 EXPORT_INTERVAL = 5
 
-# TODO - move to shared location
+
+
 # generic feature extactor wrapper for intermedia layers modified
 # from: https://medium.com/the-dl/how-to-use-pytorch-hooks-5041d777f904
 # NEW: if return_output=True, returns the original model output along with
@@ -48,7 +45,6 @@ class FeatureExtractor(torch.nn.Module):
             self._feature = output
         return fn
 
-    # TODO - non-generic
     def forward(self, x, ns):
         out = self.model(x, ns)
         if self.return_output:
@@ -58,7 +54,6 @@ class FeatureExtractor(torch.nn.Module):
 
 
 
-# TODO - remove extra args
 def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
                     iterator_tasks, embedding_tasks, cur_epoch, summary_writer, samples_per):
     attn_extractor = FeatureExtractor(model, 'module.embed.pooling.cross_att.attn_holder')
@@ -69,13 +64,7 @@ def run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_load
         print('num_contexts != 1 not supported')
         exit(-1)
 
-    # get config name
-    # temp = cfg.args.cfg_file
-    # temp = os.path.splitext(temp)[0]
-    # temp = temp.split('/')[-1]
-    # config_name = temp
-
-    # update: output name based on log-dir, to handle multiple trials
+    # output name based on log-dir, to handle multiple trials
     temp = cfg.LOGDIR
     temp = temp.split('/')[-1]
     config_name = temp
@@ -235,7 +224,7 @@ def visualize():
     logging.setup_logging(cfg.LOGDIR)
     # Setup summary writer.
     # summary_writer = SummaryWriter(os.path.join(cfg.LOGDIR, 'eval_logs'))
-    summary_writer = None # TODO clean-up
+    summary_writer = None
 
     # Print config.
     # logger.info("Train with config:")
@@ -263,7 +252,6 @@ def visualize():
     if len(cfg.DATASETS) == 1:
         samples_per = 5
 
-    # TODO - clean up extra args
     run_vis(cfg, model, train_loader, val_loader, train_emb_loader, val_emb_loader, 
             iterator_tasks, embedding_tasks, start_epoch, summary_writer, samples_per)
 

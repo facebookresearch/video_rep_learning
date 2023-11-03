@@ -29,7 +29,7 @@ from visualize_retrieval import create_retrieval_video
 
 logger = logging.get_logger(__name__)
 
-# NEW: Optionally re-use cached embedding features
+# CHANGE: Optionally re-use cached embedding features
 # Should be used ONLY when debugging EVAL settings
 DEBUG_USE_EXISTING_CACHE = False
 
@@ -77,7 +77,7 @@ def get_embeddings_dataset(cfg, model, data_loader, output_dir):
     with torch.no_grad():
         for video, frame_label, seq_len, _, _, names in data_loader:
             
-            # NEW - for debugging, use existing cache files
+            # CHANGE - for debugging, use existing cache files
             output_file = os.path.join(output_dir, names[0]) + '.pkl'
             if DEBUG_USE_EXISTING_CACHE:
                 if os.path.isfile(output_file):
@@ -258,8 +258,8 @@ def evaluate_once(cfg, model, train_loader, val_loader, train_emb_loader, val_em
         summary_writer.add_scalar(f'classification_{fraction}/val', accuracy, cur_epoch)
         torch.cuda.empty_cache()
 
+    # CHANGE: Disabled Visualizations
     print('EVAL VISUALIZATIONS DISABLED')
-    # TODO - re-enable
     # if cfg.EVAL.CLASS_NUM == 99 and is_root_proc():
     #     evaluate_oneset_data(cfg, val_emb_loader, cur_epoch, summary_writer, val_oneset_dataset)
         

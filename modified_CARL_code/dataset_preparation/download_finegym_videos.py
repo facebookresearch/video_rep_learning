@@ -11,8 +11,7 @@ from youtube_dl import main
 def getdata():
     video_dl = youtube_dl.YoutubeDL({'outtmpl': 'v_%(id)s.%(ext)s'})
     
-    # video_dir = '/home/username/datasets/finegym'
-    video_dir = '/fsx/mwalmer/carl_workdir/finegym'
+    video_dir = '/home/username/datasets/finegym'
 
     os.makedirs(video_dir, exist_ok=True)
     os.chdir(video_dir)
@@ -39,9 +38,7 @@ def getdata():
             cmd_base = "youtube-dl -f best -f mp4 "
             cmd_base += '"https://www.youtube.com/watch?v=%s" '
             cmd_base += '-o "%s/FineGym_Raw_database/%s.mp4"'
-            # os.system(cmd_base % (video_id, video_dir, video_id))
-            cmd_full = cmd_base % (video_id, video_dir, video_id)
-            print(cmd_full)
+            os.system(cmd_base % (video_id, video_dir, video_id))
             i += 1
             if i==10: break
 

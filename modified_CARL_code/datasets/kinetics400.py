@@ -18,7 +18,6 @@ from torchvision.io import read_video
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
-# from utils.dali_loader import dali_load
 from utils.decord_loader import decord_load
 
 
@@ -49,19 +48,17 @@ class K400(torch.utils.data.Dataset):
                 dataset.append(e)
 
         self.dataset = []
-        # self.error_videos = ["Kinetics400/train/blowing out candles/4o5v7aDXU9k_000000_000010.mp4",
-        #                     "Kinetics400/train/marching/uLaU_15HYdo_000002_000012.mp4",
-        #                     "Kinetics400/train/lunge/pNvkk7VDOws_000001_000011.mp4",
-        #                     "Kinetics400/train/bandaging/HvaU7W635to_000853_000863.mp4"]
         
-        # load list of missing / error videos
+        # CHANGE: load list of missing / error videos
         self.error_videos = set()
-        with open("k400_missing.txt", 'r') as f:
-            for line in f:
-                self.error_videos.add(line.strip())
-        with open("k400_error_files.txt", 'r') as f:
-            for line in f:
-                self.error_videos.add(line.strip())
+        if os.path.isfile("k400_missing.txt"):
+            with open("k400_missing.txt", 'r') as f:
+                for line in f:
+                    self.error_videos.add(line.strip())
+        if os.path.isfile("k400_error_files.txt")
+            with open("k400_error_files.txt", 'r') as f:
+                for line in f:
+                    self.error_videos.add(line.strip())
         print('%i known error videos'%len(self.error_videos))
 
         for data in dataset:
@@ -72,7 +69,7 @@ class K400(torch.utils.data.Dataset):
 
         # Perform data-augmentation
         self.num_frames = cfg.TRAIN.NUM_FRAMES
-        # NEW - for training, preproc has been moved to run GPU-side for efficiency
+        # CHANGE: for training, preproc has been moved to run GPU-side for efficiency
         # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
         self.data_preprocess = None
 
@@ -85,34 +82,28 @@ class K400(torch.utils.data.Dataset):
 
         # video_file = os.path.join(self.cfg.args.workdir, 'kinetics_400/k400/train', self.dataset[index]["video_file"])
         video_file = os.path.join('/datasets01/kinetics_400/k400/train', self.dataset[index]["video_file"])
-        # Old loading method:
-        # video, _, info = read_video(video_file, pts_unit='sec')
-        # seq_len = len(video)
-        # video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
         
         # get frame count
         data = cv2.VideoCapture(video_file)
         seq_len = int(data.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_label = -1 * torch.ones(seq_len)
 
+        # CHANGE: extra handling for empty/corrupted videos
         if seq_len == 0:
             print('ERROR VIDEO:')
             print(video_file)
-            # NEW: extra handling for empty videos (did not download correctly)
             with open("k400_error_files.txt", 'a') as f:
                 f.write(self.dataset[index]["video_file"] + '\n')
                 print('WARNING: Corrupted file: ' + self.dataset[index]["video_file"])
-            # return first video as placeholder to continue run
+            # return first video as placeholder
             return self.__getitem__(0)
 
-        # NEW - fast data loading with NVIDIA DALI
+        # CHANGE: fast data loading with Decord
         steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
         steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
         s_start = min(int(steps_0[0]), int(steps_1[0]))
         s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
-        # video = dali_load(video_file, s_start, s_stop+1, device_id=self.local_rank)
         video = decord_load(video_file, s_start, s_stop+1)
-        # video = decord_load(video_file, s_start, s_stop+1)
         steps_0 -= s_start
         steps_1 -= s_start
         view_0 = video[steps_0]
@@ -121,6 +112,7 @@ class K400(torch.utils.data.Dataset):
         view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
         videos = (view_0, view_1)
         
+        # CHANGE: preproc moved to GPU-side for efficiency
         names = [name, name]
         # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
         # view_0 = self.data_preprocess(video[steps_0.long()])

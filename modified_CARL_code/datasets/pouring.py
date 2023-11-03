@@ -10,7 +10,6 @@ import numpy as np
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
-# from utils.dali_loader import dali_load
 from utils.decord_loader import decord_load
 
 logger = logging.get_logger(__name__)
@@ -41,14 +40,14 @@ class Pouring(torch.utils.data.Dataset):
             num_train = max(1, int(cfg.DATA.FRACTION * len(self.dataset)))
             self.dataset = self.dataset[:num_train]
 
-        # NEW: OPTIONAL: sample_fix - use alternate sampling, see: https://github.com/minghchen/CARL_code/issues/3
+        # CHANGE (OPTIONAL) - use alternate sampling, see: https://github.com/minghchen/CARL_code/issues/3
         self.sample_fix = False
         if 'SAMPLE_FIX' in cfg.DATA:
             self.sample_fix = cfg.DATA.SAMPLE_FIX
 
         self.num_frames = cfg.TRAIN.NUM_FRAMES
         # Perform data-augmentation
-        # NEW - for training, preproc has been moved to run GPU-side for efficiency
+        # CHANGE: for training, preproc has been moved to run GPU-side for efficiency
         if self.cfg.SSL and self.mode=="train":
             # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
             self.data_preprocess = None
@@ -71,22 +70,14 @@ class Pouring(torch.utils.data.Dataset):
         frame_label = self.dataset[index]["frame_label"]
         seq_len = self.dataset[index]["seq_len"]
         video_file = os.path.join(self.cfg.PATH_TO_DATASET, self.dataset[index]["video_file"])
-        
-        # old video loading
-        # video, _, info = read_video(video_file, pts_unit='sec')
-        # video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
-        # assert len(video) == seq_len
-        # assert len(video) == len(frame_label)
 
-        # NOTE - moved pre-proc to run GPU-side for efficiency
         if self.cfg.SSL and not self.sample_all:
             
-            # NEW - fast data loading with NVIDIA DALI
+            # CHANGE: fast data loading with Decord
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
             s_start = min(int(steps_0[0]), int(steps_1[0]))
             s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
-            # video = dali_load(video_file, s_start, s_stop+1) # TODO handle frame size
             video = decord_load(video_file, s_start, s_stop+1)
             steps_0 -= s_start
             steps_1 -= s_start
@@ -96,6 +87,7 @@ class Pouring(torch.utils.data.Dataset):
             view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
             videos = (view_0, view_1)
 
+            # CHANGE: moved pre-proc to run GPU-side for efficiency
             names = [name, name]
             # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             # view_0 = self.data_preprocess(video[steps_0.long()])
@@ -121,8 +113,6 @@ class Pouring(torch.utils.data.Dataset):
             chosen_steps = steps.clone()
             video_mask = torch.ones(seq_len)
         
-        # load new way:
-        # video = dali_load(video_file, steps[0], steps[-1]+1)
         video = decord_load(video_file, steps[0], steps[-1]+1)
         video = video.permute(0,3,1,2).float() / 255.0
 

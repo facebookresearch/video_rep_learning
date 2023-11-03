@@ -17,7 +17,6 @@ import torchvision
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
-# from utils.dali_loader import dali_load
 from utils.decord_loader import decord_load
 
 logger = logging.get_logger(__name__)
@@ -38,8 +37,6 @@ class Finegym(torch.utils.data.Dataset):
         self.train_dataset = os.path.join(cfg.PATH_TO_DATASET, f"gym{cfg.EVAL.CLASS_NUM}_train_v1.0.pkl")
         self.val_dataset = os.path.join(cfg.PATH_TO_DATASET, f"gym{cfg.EVAL.CLASS_NUM}_val.pkl")
         self.additional_dataset = os.path.join(cfg.PATH_TO_DATASET, f"additional_v1.0.pkl")
-
-        # NEW - track local rank for DALI multi-GPU
         self.local_rank = local_rank
 
         self.error_videos = []
@@ -55,7 +52,8 @@ class Finegym(torch.utils.data.Dataset):
                     dataset = pickle.load(f)
 
             self.dataset = []
-            # NOTE - added error checking into the data pre-processing, so this check is not needed anymore
+
+            # CHANGE: added error checking into data preprocessing, so this check is not needed now
             # for data in tqdm(dataset, total=len(dataset)):
             #     try:
             #         video_file = os.path.join(self.cfg.PATH_TO_DATASET, data["video_file"])
@@ -67,6 +65,7 @@ class Finegym(torch.utils.data.Dataset):
             #     else:
             #         self.dataset.append(data)
             # print(self.error_videos)
+            
             for data in dataset:
                 self.dataset.append(data)
             
@@ -84,7 +83,7 @@ class Finegym(torch.utils.data.Dataset):
 
         # Perform data-augmentation
         self.num_frames = cfg.TRAIN.NUM_FRAMES
-        # NEW - for training, preproc has been moved to run GPU-side for efficiency
+        # CHANGE: for training, preproc has been moved to run GPU-side for efficiency
         if self.cfg.SSL and self.mode=="train":
             # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
             self.data_preprocess = None
@@ -110,12 +109,11 @@ class Finegym(torch.utils.data.Dataset):
         
         if self.cfg.SSL and not self.sample_all:
 
-            # NEW - fast data loading with NVIDIA DALI
+            # CHANGE: faster data loading with DECORD
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
             s_start = min(int(steps_0[0]), int(steps_1[0]))
             s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
-            # video = dali_load(video_file, s_start, s_stop+1, device_id=self.local_rank)
             video = decord_load(video_file, s_start, s_stop+1)
             steps_0 -= s_start
             steps_1 -= s_start
@@ -125,7 +123,7 @@ class Finegym(torch.utils.data.Dataset):
             view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
             videos = (view_0, view_1)
 
-            # NOTE - moved pre-proc to run GPU-side for efficiency
+            # CHANGE: moved pre-proc to run GPU-side for efficiency
             names = [name, name]
             # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             # view_0 = self.data_preprocess(video[steps_0.long()])
@@ -151,19 +149,10 @@ class Finegym(torch.utils.data.Dataset):
             chosen_steps = steps.clone()
             video_mask = torch.ones(seq_len)
 
-        # NEW - PATH 2: Full video loading for inference
-
-        # load old way:
+        # CHANGE: faster video loading with Decord
         # video, _, info = read_video(video_file, pts_unit='sec')
-        # video = video.permute(0,3,1,2).float() / 255.0 
-        # print(video.shape)
-
-        # load new way:
-        # video = dali_load(video_file, steps[0], steps[-1]+1, device_id=self.local_rank)
         video = decord_load(video_file, steps[0], steps[-1]+1)
         video = video.permute(0,3,1,2).float() / 255.0
-        # print(video.shape)
-        # print('-')
         
         # Select data based on steps
         video = video[steps.long()]

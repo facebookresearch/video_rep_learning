@@ -15,11 +15,6 @@ import psutil
 import utils.logging as logging
 from datasets.data_augment import create_data_augment, create_ssl_data_augment
 
-# from utils.dali_loader import dali_load
-
-# EXPERIMENTAL - TODO - LOCAL SCRATCH CACHE
-# USE_SCRATCH_CACHE = False
-
 logger = logging.get_logger(__name__)
 
 PENN_ACTION_LIST = [
@@ -69,7 +64,7 @@ class PennAction(torch.utils.data.Dataset):
         self.num_frames = cfg.TRAIN.NUM_FRAMES
         
         # Perform data-augmentation
-        # NEW - for training, preproc has been moved to run GPU-side for efficiency
+        # CHANGE: for training, preproc has been moved to run GPU-side for efficiency
         if self.cfg.SSL and self.mode=="train":
             # self.data_preprocess = create_ssl_data_augment(cfg, augment=True)
             self.data_preprocess = None
@@ -84,11 +79,6 @@ class PennAction(torch.utils.data.Dataset):
         if 'tcn' in cfg.TRAINING_ALGO:
             self.num_frames = self.num_frames // 2
 
-        # NEW - EXPERIMENTAL - SCRATCH CACHE
-        # if USE_SCRATCH_CACHE:
-        #     print('SCRATCH CACHE ENABLED')
-        # TODO - REMOVE
-
 
 
     def __len__(self):
@@ -96,44 +86,22 @@ class PennAction(torch.utils.data.Dataset):
 
 
 
-    # NEW modified to return videos without pre-processing, so preprocessing can be handled on GPU-side
+    # CHANGE: modified to return videos without pre-processing, so preprocessing can be handled on GPU-side
     def __getitem__(self, index):
         t0 = time.time()
 
         # id = self.dataset[index]["id"]
-        
         name = self.dataset[index]["name"]
         frame_label = self.dataset[index]["frame_label"]
         seq_len = self.dataset[index]["seq_len"]
         video_file = os.path.join(self.cfg.PATH_TO_DATASET, self.dataset[index]["video_file"])
 
-        # # NEW CACHE SYSTEM FOR DECODED VIDEOS ON LOCAL DRIVE
-        # # TODO - REMOVE
-        # cache_dir = '/scratch/mwalmer/temp/penn_action/' # TODO - add setting
-        # cache_file = os.path.join(cache_dir, self.dataset[index]["video_file"]+'_cache.pkl')
-        # if USE_SCRATCH_CACHE and os.path.isfile(cache_file):
-        #     with open(cache_file, 'rb') as f:
-        #         video = pickle.load(f)
-        # else:
-        #     video, _, info = read_video(video_file, pts_unit='sec')
-        #     video = video.permute(0,3,1,2).float() / 255.0 # T H W C -> T C H W, [0,1] tensor
-        #     # NEW
-        #     if USE_SCRATCH_CACHE:
-        #         cur_cache, _ = os.path.split(cache_file)
-        #         os.makedirs(cur_cache, exist_ok=True)
-        #         with open(cache_file, 'wb') as f:
-        #             pickle.dump(video, f)
-
         if self.cfg.SSL and not self.sample_all:
             
-            # NEW - fast data loading with NVIDIA DALI
             steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             steps_1, chosen_step_1, video_mask1 = self.sample_frames(seq_len, self.num_frames, pre_steps=steps_0)
             s_start = min(int(steps_0[0]), int(steps_1[0]))
             s_stop = max(int(steps_0[-1]), int(steps_1[-1]))
-            # video = dali_load(video_file, s_start, s_stop+1)
-            # steps_0 -= s_start
-            # steps_1 -= s_start
             video, _, info = read_video(video_file, pts_unit='sec')
             view_0 = video[steps_0]
             view_1 = video[steps_1]
@@ -141,7 +109,7 @@ class PennAction(torch.utils.data.Dataset):
             view_1 = view_1.permute(0,3,1,2).float() / 255.0 # T C H W, [0,1] tensor
             videos = (view_0, view_1)
 
-            # NOTE - moved pre-proc to run GPU-side for efficiency
+            # CHANGE: moved pre-proc to run GPU-side for efficiency
             names = [name, name]
             # steps_0, chosen_step_0, video_mask0 = self.sample_frames(seq_len, self.num_frames)
             # view_0 = video[steps_0.long()]
@@ -167,22 +135,8 @@ class PennAction(torch.utils.data.Dataset):
             chosen_steps = steps.clone()
             video_mask = torch.ones(seq_len)
 
-        # Select data based on steps
-        # print('DEBUG - THIS HAPPENDED')
-        # print(video.shape)
-
-        # load old way:
-        # video, _, info = read_video(video_file, pts_unit='sec')
-        # video = video.permute(0,3,1,2).float() / 255.0 
-        # print(video.shape)
-
-        # load new way:
-        # video = dali_load(video_file, steps[0], steps[-1]+1)
         video, _, info = read_video(video_file, pts_unit='sec')
         video = video.permute(0,3,1,2).float() / 255.0
-        # print(video.shape)
-        # print('-')
-
         video = video[steps.long()]
         video = self.data_preprocess(video)
 

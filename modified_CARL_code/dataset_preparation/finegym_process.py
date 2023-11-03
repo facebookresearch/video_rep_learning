@@ -10,7 +10,7 @@ import pickle
 import numpy as np
 import torch
 
-# NEW - ONLY_CHECK mode: check for all files without processing yet
+# CHANGE: Added an "ONLY_CHECK" mode to just check for all files by not process them
 ONLY_CHECK = False
 
 # Optional: for debug provide a list of video id's, and only those id's will be processed
@@ -52,7 +52,7 @@ def main(split="train", classes="gym99", version="v1.0", debug=None):
         event_id = full_id.split("_A_")[0]
         event_ids.add(event_id)
 
-    # NEW: convert event_ids to a list and sort
+    # CHANGE: convert event_ids to a list and sort
     event_ids = list(event_ids)
     event_ids = sorted(event_ids)
     print('loaded %i event_ids to process'%len(event_ids))
@@ -90,7 +90,7 @@ def main(split="train", classes="gym99", version="v1.0", debug=None):
                     found = True
                     break
 
-            # NEW check for missing files
+            # CHANGE: check for missing files
             if not found:
                 w = 'WARNING: MISSING FILE: %s'%video_path
                 print(w)
@@ -107,22 +107,17 @@ def main(split="train", classes="gym99", version="v1.0", debug=None):
             # os.system(cmd)
             # os.remove(temp_output_file)
 
-            # NEW - use two temp files to avoid issues
+            # CHANGE: use two temp files to avoid issues
             temp_output_file_1 = os.path.join(output_dir, event_id) + "_temp1.mp4"
             temp_output_file_2 = os.path.join(output_dir, event_id) + "_temp2.mp4"
-            # cmd = f'ffmpeg -hide_banner -loglevel panic -y -ss {start_time}s -to {end_time}s -i {video_file} -c:v copy -c:a copy {temp_output_file_1}'
-            # cmd = f'ffmpeg -y -ss {start_time}s -to {end_time}s -i {video_file} -c:v copy -c:a copy {temp_output_file_1}'
-            
-            # NEW: NEED -strict -2
             cmd = f'ffmpeg -hide_banner -loglevel panic -y -ss {start_time}s -to {end_time}s -i {video_file} -strict -2 -c:v copy -c:a copy {temp_output_file_1}'
-            # cmd = f'ffmpeg -y -ss {start_time}s -to {end_time}s -i {video_file} -strict -2 -c:v copy -c:a copy {temp_output_file_1}'
             os.system(cmd)
             cmd = f'ffmpeg -hide_banner -loglevel panic -y -i {temp_output_file_1} -strict -2 -vf scale=640:360 {temp_output_file_2}'
             os.system(cmd)
             cmd = f'ffmpeg -hide_banner -loglevel panic -y -i {temp_output_file_2} -filter:v fps=25 {output_file}'
             os.system(cmd)
 
-            # NEW - handle errors
+            # CHANGE: handle errors
             if not os.path.isfile(temp_output_file_1):
                 w = 'WARNING: MISSING TEMP FILE: %s'%temp_output_file_1
                 print(w)
@@ -168,22 +163,17 @@ def main(split="train", classes="gym99", version="v1.0", debug=None):
     return warnings
 
 
-
-
 if __name__ == '__main__':
     if ONLY_CHECK:
         print('ONLY_CHECK MODE: checking for missing files')
-    
+    # CHANGE: track and report warnings at end of run
     ALL_WARNINGS = []
-    # ALL_WARNINGS += main(split="train", classes="gym99", version="v1.0")
-    # ALL_WARNINGS += main(split="val", classes="gym99", version="v1.0")
+    ALL_WARNINGS += main(split="train", classes="gym99", version="v1.0")
+    ALL_WARNINGS += main(split="val", classes="gym99", version="v1.0")
     ALL_WARNINGS += main(split="train", classes="gym288", version="v1.0")
     ALL_WARNINGS += main(split="val", classes="gym288", version="v1.0")
+    # ALL_WARNINGS += main(split="train", classes="gym99", version="v1.1")
+    # ALL_WARNINGS += main(split="train", classes="gym288", version="v1.1")
     print('TOTAL WARNING COUNT: %i'%len(ALL_WARNINGS))
     for W in ALL_WARNINGS:
         print(W)
-
-    
-
-    # main(split="train", classes="gym99", version="v1.1")
-    # main(split="train", classes="gym288", version="v1.1")
