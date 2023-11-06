@@ -5,3 +5,4 @@ __pycache__/*
 run_aml.py
 *.log
 *.slurm
+*.yml
