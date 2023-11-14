@@ -1,3 +1,5 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import torch
 
 # CHANGE: Enabled persistent workers for some loaders

@@ -1,3 +1,5 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 # coding=utf-8
 import os
 import json
@@ -16,8 +18,7 @@ ONLY_CHECK = False
 # Optional: for debug provide a list of video id's, and only those id's will be processed
 # save_file will not be generated if debug is set
 def main(split="train", classes="gym99", version="v1.0", debug=None):
-    # data_root = "/home/username/datasets/finegym"
-    data_root = "/fsx/mwalmer/carl_workdir/finegym"
+    data_root = "/home/username/datasets/finegym"
     output_dir = os.path.join(data_root, "processed_videos")
     os.makedirs(output_dir, exist_ok=True)
     if split == "train":

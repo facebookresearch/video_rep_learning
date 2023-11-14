@@ -1,4 +1,7 @@
 # coding=utf-8
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import os
 import sys
 import pprint
@@ -29,7 +32,7 @@ TRAIN_ONLY = False
 # NEW: turn off TQDM
 USE_TQDM = False
 # NEW: force regular reporting on multi-gpu jobs (for Kinnetics)
-FORCE_REPORT = False
+FORCE_REPORT = True
 
 
 # CHANGE: apply preprocessing ops to views on GPU

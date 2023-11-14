@@ -1,6 +1,8 @@
 # coding=utf-8
 """Evaluate embeddings on downstream tasks."""
 
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import os
 import math
 import time
