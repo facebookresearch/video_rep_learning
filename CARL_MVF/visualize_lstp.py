@@ -1,5 +1,7 @@
 # coding=utf-8
-"""Visualize the attention of smart tokens. Based on evaluate.py"""
+"""Visualize the attention of Learnable Spatial Token Pooling layers. Based on evaluate.py"""
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 
 import os
 import math

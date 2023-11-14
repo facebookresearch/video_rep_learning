@@ -1,4 +1,7 @@
 # helper to read multiple log files for multiple trials and report the combined results ± 2stdev
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import argparse
 import os
 import numpy as np
@@ -236,7 +239,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("cfg", help="config file to search for results for")
-    parser.add_argument("--ld", help="log dir to search for results in", default="/fsx/mwalmer/carl_logs")
+    parser.add_argument("--ld", help="log dir to search for results in", default="/home/carl_logs")
     parser.add_argument("--all", help="print all results", action="store_true")
     parser.add_argument("--emax", help="limit epoch reading to a certain number, for partial result files", default=-1, type=int)
     parser.add_argument("--verbose", help="enable detailed printing", action="store_true")

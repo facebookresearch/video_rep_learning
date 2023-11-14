@@ -1,4 +1,7 @@
 # copy from slowfast.utils.parser
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import os
 import yaml
 import utils.logging as logging

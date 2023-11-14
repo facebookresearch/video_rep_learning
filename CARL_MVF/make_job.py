@@ -1,5 +1,8 @@
 # Helper script to automate the generation of job launching scripts.
 # use the "--micro" flag to make a micro job for debugging (2 training epochs)
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+
 import argparse
 import os
 import random
