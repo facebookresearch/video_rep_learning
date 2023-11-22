@@ -37,12 +37,17 @@ python -m torch.distributed.launch --nproc_per_node 1 train.py --workdir ~/datas
 ```
 
 # Citation
+
+Please cite as:
+
+``` bibtex
 @article{walmer2023multi,
-  title={Multi-entity Video Transformers for Fine-Grained Video Representation Learning},
-  author={Walmer, Matthew and Kanjirathinkal, Rose and Tai, Kai Sheng and Muzumdar, Keyur and Tian, Taipeng and Shrivastava, Abhinav},
-  journal={arXiv preprint arXiv:2311.10873},
-  year={2023}
+  title = {Multi-entity Video Transformers for Fine-Grained Video Representation Learning},
+  author = {Walmer, Matthew and Kanjirathinkal, Rose and Tai, Kai Sheng and Muzumdar, Keyur and Tian, Taipeng and Shrivastava, Abhinav},
+  journal = {arXiv preprint arXiv:2311.10873},
+  year = {2023}
 }
+```
 
 # License
 
