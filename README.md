@@ -1,8 +1,10 @@
-# MV-Former
+# Multi-entity Video Transformers for Fine-Grained Video Representation Learning (CVPRW 2025)
 
-This is the code for MV-Former (Multi-entity Video Transformer) from "Multi-entity Video Transformers For Fine-Grained Video Representation Learning" (https://arxiv.org/abs/2311.10873).
+![plot](./arch.png)
 
-This code is forked from the Contrastive Action Representation Learning (CARL) codebase (https://github.com/minghchen/CARL_code).
+This is the official code release for MV-Former (Multi-entity Video Transformer) ([paper](https://openaccess.thecvf.com/content/CVPR2025W/FGVC/html/Walmer_Multi-entity_Video_Transformers_for_Fine-Grained_Video_Representation_Learning_CVPRW_2025_paper.html)) as published at the 12th Workshop on Fine-Grained Visual Categorization at CVPR 2025.
+
+This code is forked from the Contrastive Action Representation Learning (CARL) codebase ([link](https://github.com/minghchen/CARL_code)).
 
 # Environment Setup
 
@@ -41,11 +43,13 @@ python -m torch.distributed.launch --nproc_per_node 1 train.py --workdir ~/datas
 Please cite as:
 
 ``` bibtex
-@article{walmer2023multi,
-  title = {Multi-entity Video Transformers for Fine-Grained Video Representation Learning},
-  author = {Walmer, Matthew and Kanjirathinkal, Rose and Tai, Kai Sheng and Muzumdar, Keyur and Tian, Taipeng and Shrivastava, Abhinav},
-  journal = {arXiv preprint arXiv:2311.10873},
-  year = {2023}
+@InProceedings{Walmer_2025_CVPR,
+    author    = {Walmer, Matthew and Kanjirathinkal, Rose and Tai, Kai Sheng and Muzumdar, Keyur and Tian, Taipeng and Shrivastava, Abhinav},
+    title     = {Multi-entity Video Transformers for Fine-Grained Video Representation Learning},
+    booktitle = {Proceedings of the Computer Vision and Pattern Recognition Conference (CVPR) Workshops},
+    month     = {June},
+    year      = {2025},
+    pages     = {2110-2120}
 }
 ```
 
